@@ -1,0 +1,20 @@
+spec:
+  containers:
+    - name: mcp-server
+      image: /REMITAPP_DB/REMITAPP_SCHEMA/IMAGE_REPO/remitapp-mcp:latest
+      env:
+        REMIT_API_URL: http://REMITAPP_API_SERVICE:8000
+      readinessProbe:
+        port: 8081
+        path: /health
+      resources:
+        requests:
+          cpu: 0.5
+          memory: 512M
+        limits:
+          cpu: 1
+          memory: 1G
+  endpoints:
+    - name: mcp-endpoint
+      port: 8080
+      public: true

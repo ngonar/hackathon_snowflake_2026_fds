@@ -1,0 +1,23 @@
+definition_version: "2"
+
+entities:
+  ngonaroid_client:
+    type: snowflake-app
+    identifier:
+      name: NGONAROID_CLIENT
+      database: USER$NGONAR
+      schema: PUBLIC
+    artifacts:
+      - src: ./*
+        dest: ./
+        ignore:
+          - node_modules
+          - .env*
+          - __pycache__
+          - "*.pyc"
+          - .next
+          - .git
+          - snowflake.log
+
+    query_warehouse: COMPUTE_WH
+    code_workspace: USER$NGONAR.PUBLIC.SNOWFLAKE_APPS

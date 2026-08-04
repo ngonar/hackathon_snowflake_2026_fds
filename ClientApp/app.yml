@@ -1,0 +1,8 @@
+profile:
+  label: "Ngonaroid Client"
+  description: "Ngonaroid FDS client application"
+  icon: public/favicon.svg
+
+launch:
+  web:
+    command: "node server.js"
