@@ -4,6 +4,7 @@ import {
   User, Wallet, Shield, Users, CreditCard, Send, History, 
   Plus, Check, X, RefreshCw, AlertTriangle, ArrowRight, HelpCircle 
 } from 'lucide-react';
+import RiskBreakdownCard from './RiskBreakdownCard';
 
 export default function UserDashboard({ user, onRefreshUser, showToast }) {
   // Loading states
@@ -13,6 +14,16 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [sendingMoney, setSendingMoney] = useState(false);
   const [fundingTxnId, setFundingTxnId] = useState(null);
+
+  // FDS risk breakdown expansion state
+  const [expandedTxnIds, setExpandedTxnIds] = useState({});
+
+  const toggleTxnExpand = (txnId) => {
+    setExpandedTxnIds(prev => ({
+      ...prev,
+      [txnId]: !prev[txnId]
+    }));
+  };
 
   // Data states
   const [recipients, setRecipients] = useState([]);
@@ -640,43 +651,73 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
                 {transactions.map((t) => {
                   const feeAmount = t.fee;
                   const totalCost = t.source_amount + feeAmount;
+                  const isRiskRow = t.status === 'FAILED' || t.status === 'SUSPICIOUS';
                   return (
-                    <tr key={t.id}>
-                      <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t.reference_number}</td>
-                      <td>{getRecipientLabel(t.recipient_id)}</td>
-                      <td style={{ fontWeight: 500 }}>${t.source_amount.toFixed(2)}</td>
-                      <td style={{ color: 'var(--text-muted)' }}>${feeAmount.toFixed(2)}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--success)' }}>
-                        {t.target_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {t.target_currency}
-                      </td>
-                      <td>
-                        <span className={`badge badge-${t.status.toLowerCase()}`}>
-                          {t.status}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                        {new Date(t.created_at).toLocaleString()}
-                      </td>
-                      <td>
-                        {t.status === 'PENDING' && (
-                          <button
-                            className="btn btn-success btn-sm"
-                            style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
-                            onClick={() => handleFundTransaction(t.id, totalCost)}
-                            disabled={fundingTxnId === t.id}
-                          >
-                            {fundingTxnId === t.id ? (
-                              <RefreshCw size={12} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-                            ) : (
-                              'Pay / Fund'
-                            )}
-                          </button>
-                        )}
-                        {t.status !== 'PENDING' && (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>None</span>
-                        )}
-                      </td>
-                    </tr>
+                    <React.Fragment key={t.id}>
+                      <tr 
+                        style={{ cursor: isRiskRow ? 'pointer' : 'default' }}
+                        onClick={() => isRiskRow && toggleTxnExpand(t.id)}
+                        className={isRiskRow ? 'row-clickable' : ''}
+                      >
+                        <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t.reference_number}</td>
+                        <td>{getRecipientLabel(t.recipient_id)}</td>
+                        <td style={{ fontWeight: 500 }}>${t.source_amount.toFixed(2)}</td>
+                        <td style={{ color: 'var(--text-muted)' }}>${feeAmount.toFixed(2)}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--success)' }}>
+                          {t.target_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {t.target_currency}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${t.status.toLowerCase()}`}>
+                            {t.status}
+                          </span>
+                        </td>
+                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          {new Date(t.created_at).toLocaleString()}
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {t.status === 'PENDING' ? (
+                            <button
+                              className="btn btn-success btn-sm"
+                              style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
+                              onClick={() => handleFundTransaction(t.id, totalCost)}
+                              disabled={fundingTxnId === t.id}
+                            >
+                              {fundingTxnId === t.id ? (
+                                <RefreshCw size={12} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+                              ) : (
+                                'Pay / Fund'
+                              )}
+                            </button>
+                          ) : isRiskRow ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{ 
+                                display: 'inline-flex', 
+                                padding: '0.3rem 0.6rem', 
+                                fontSize: '0.75rem',
+                                backgroundColor: t.status === 'FAILED' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                                border: `1px solid ${t.status === 'FAILED' ? 'var(--danger-border)' : 'var(--warning-border)'}`,
+                                color: t.status === 'FAILED' ? 'var(--danger)' : 'var(--warning)',
+                                fontWeight: 600
+                              }}
+                              onClick={() => toggleTxnExpand(t.id)}
+                            >
+                              {expandedTxnIds[t.id] ? 'Hide Report' : 'Risk Report'}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>None</span>
+                          )}
+                        </td>
+                      </tr>
+                      {expandedTxnIds[t.id] && isRiskRow && (
+                        <tr>
+                          <td colSpan="8" style={{ padding: '0 1rem 1rem 1rem', borderTop: 'none', background: 'rgba(255,255,255,0.01)' }}>
+                            <RiskBreakdownCard transaction={t} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

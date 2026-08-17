@@ -166,10 +166,26 @@ def get_transactions_by_sender(db: Session, sender_id: int) -> List[models.Trans
 def get_all_transactions(db: Session) -> List[models.Transaction]:
     return db.query(models.Transaction).all()
 
-def update_transaction_status(db: Session, txn_id: int, new_status: str) -> Optional[models.Transaction]:
+def update_transaction_status(
+    db: Session, 
+    txn_id: int, 
+    new_status: str,
+    anomaly_score: Optional[float] = None,
+    velocity_flags: Optional[str] = None,
+    fraud_explanation: Optional[str] = None,
+    fraud_evidence: Optional[str] = None
+) -> Optional[models.Transaction]:
     db_txn = get_transaction(db, txn_id)
     if db_txn:
         db_txn.status = new_status
+        if anomaly_score is not None:
+            db_txn.anomaly_score = anomaly_score
+        if velocity_flags is not None:
+            db_txn.velocity_flags = velocity_flags
+        if fraud_explanation is not None:
+            db_txn.fraud_explanation = fraud_explanation
+        if fraud_evidence is not None:
+            db_txn.fraud_evidence = fraud_evidence
         db.commit()
         db.refresh(db_txn)
     return db_txn

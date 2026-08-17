@@ -4,6 +4,7 @@ import {
   Users, ShieldCheck, DollarSign, ListOrdered, CheckCircle2, 
   XCircle, Edit, RefreshCw, Eye, ArrowRight, HelpCircle 
 } from 'lucide-react';
+import RiskBreakdownCard from './RiskBreakdownCard';
 
 export default function AdminPanel({ showToast }) {
   // Loading states
@@ -16,6 +17,16 @@ export default function AdminPanel({ showToast }) {
   const [pendingKycUsers, setPendingKycUsers] = useState([]);
   const [rates, setRates] = useState([]);
   const [allTransactions, setAllTransactions] = useState([]);
+
+  // FDS risk breakdown expansion state
+  const [expandedTxnIds, setExpandedTxnIds] = useState({});
+
+  const toggleTxnExpand = (txnId) => {
+    setExpandedTxnIds(prev => ({
+      ...prev,
+      [txnId]: !prev[txnId]
+    }));
+  };
 
   // Exchange rate form state
   const [rateSource, setRateSource] = useState('USD');
@@ -358,81 +369,142 @@ export default function AdminPanel({ showToast }) {
                 </tr>
               </thead>
               <tbody>
-                {allTransactions.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.id}</td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t.reference_number}</td>
-                    <td>User #{t.sender_id}</td>
-                    <td>Recip #{t.recipient_id}</td>
-                    <td>${t.source_amount.toFixed(2)} (+${t.fee.toFixed(2)})</td>
-                    <td style={{ fontWeight: 600, color: 'var(--success)' }}>
-                      {t.target_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {t.target_currency}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${t.status.toLowerCase()}`}>
-                        {t.status}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                      {new Date(t.created_at).toLocaleString()}
-                    </td>
-                    <td>
-                      {t.status === 'FUNDED' && (
-                        <div style={{ display: 'flex', gap: '0.25rem' }}>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
-                            onClick={() => handleUpdateStatus(t.id, 'PROCESSING')}
-                            disabled={updatingTxnId === t.id}
-                          >
-                            Set Processing
-                          </button>
-                          <button
-                            className="btn btn-success btn-sm"
-                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
-                            onClick={() => handleUpdateStatus(t.id, 'COMPLETED')}
-                            disabled={updatingTxnId === t.id}
-                          >
-                            Set Completed
-                          </button>
-                        </div>
-                      )}
-                      
-                      {t.status === 'PROCESSING' && (
-                        <div style={{ display: 'flex', gap: '0.25rem' }}>
-                          <button
-                            className="btn btn-success btn-sm"
-                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
-                            onClick={() => handleUpdateStatus(t.id, 'COMPLETED')}
-                            disabled={updatingTxnId === t.id}
-                          >
-                            Set Completed
-                          </button>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
-                            onClick={() => handleUpdateStatus(t.id, 'FAILED')}
-                            disabled={updatingTxnId === t.id}
-                          >
-                            Set Failed
-                          </button>
-                        </div>
-                      )}
+                {allTransactions.map((t) => {
+                  const isRiskRow = t.status === 'FAILED' || t.status === 'SUSPICIOUS';
+                  return (
+                    <React.Fragment key={t.id}>
+                      <tr 
+                        style={{ cursor: isRiskRow ? 'pointer' : 'default' }}
+                        onClick={() => isRiskRow && toggleTxnExpand(t.id)}
+                        className={isRiskRow ? 'row-clickable' : ''}
+                      >
+                        <td>{t.id}</td>
+                        <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t.reference_number}</td>
+                        <td>User #{t.sender_id}</td>
+                        <td>Recip #{t.recipient_id}</td>
+                        <td>${t.source_amount.toFixed(2)} (+${t.fee.toFixed(2)})</td>
+                        <td style={{ fontWeight: 600, color: 'var(--success)' }}>
+                          {t.target_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} {t.target_currency}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${t.status.toLowerCase()}`}>
+                            {t.status}
+                          </span>
+                        </td>
+                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          {new Date(t.created_at).toLocaleString()}
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {t.status === 'FUNDED' && (
+                            <div style={{ display: 'flex', gap: '0.25rem' }}>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'PROCESSING')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Set Processing
+                              </button>
+                              <button
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'COMPLETED')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Set Completed
+                              </button>
+                            </div>
+                          )}
+                          
+                          {t.status === 'PROCESSING' && (
+                            <div style={{ display: 'flex', gap: '0.25rem' }}>
+                              <button
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'COMPLETED')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Set Completed
+                              </button>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'FAILED')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Set Failed
+                              </button>
+                            </div>
+                          )}
 
-                      {t.status === 'PENDING' && (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 500 }}>
-                          Awaiting User Payment
-                        </span>
-                      )}
+                          {t.status === 'SUSPICIOUS' && (
+                            <div style={{ display: 'flex', gap: '0.25rem' }}>
+                              <button
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'PROCESSING')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Approve/Process
+                              </button>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => handleUpdateStatus(t.id, 'FAILED')}
+                                disabled={updatingTxnId === t.id}
+                              >
+                                Reject/Fail
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => toggleTxnExpand(t.id)}
+                              >
+                                {expandedTxnIds[t.id] ? 'Hide' : 'Audit'}
+                              </button>
+                            </div>
+                          )}
 
-                      {(t.status === 'COMPLETED' || t.status === 'FAILED') && (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Finalized
-                        </span>
+                          {t.status === 'FAILED' && (
+                            <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 500 }}>
+                                Blocked
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                                onClick={() => toggleTxnExpand(t.id)}
+                              >
+                                {expandedTxnIds[t.id] ? 'Hide' : 'Audit'}
+                              </button>
+                            </div>
+                          )}
+
+                          {t.status === 'PENDING' && (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 500 }}>
+                              Awaiting User Payment
+                            </span>
+                          )}
+
+                          {t.status === 'COMPLETED' && (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              Finalized
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {expandedTxnIds[t.id] && isRiskRow && (
+                        <tr>
+                          <td colSpan="9" style={{ padding: '0 1rem 1rem 1rem', borderTop: 'none', background: 'rgba(255,255,255,0.01)' }}>
+                            <RiskBreakdownCard transaction={t} />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -82,6 +82,12 @@ class Transaction(Base):
     
     status = Column(String, default="PENDING", nullable=False)  # "PENDING", "FUNDED", "PROCESSING", "COMPLETED", "CANCELLED", "FAILED"
     
+    # FDS risk analysis metadata
+    anomaly_score = Column(Float, nullable=True)
+    velocity_flags = Column(String, nullable=True)      # Stored as JSON list string
+    fraud_explanation = Column(String, nullable=True)
+    fraud_evidence = Column(String, nullable=True)         # Stored as JSON list string
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 

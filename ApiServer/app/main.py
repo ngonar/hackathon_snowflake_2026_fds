@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from app.database import engine, Base, SessionLocal
 from app import crud, schemas, auth
 from app.routers import auth as auth_router, users as users_router, recipients as recipients_router, rates as rates_router, transactions as transactions_router, admin as admin_router
@@ -10,6 +11,21 @@ from app.routers import auth as auth_router, users as users_router, recipients a
 async def lifespan(app: FastAPI):
     # 1. Initialize Database Tables
     Base.metadata.create_all(bind=engine)
+    
+    # Run migrations/alters for SQLite columns if not present
+    db = SessionLocal()
+    for col, col_type in [
+        ("anomaly_score", "FLOAT"),
+        ("velocity_flags", "TEXT"),
+        ("fraud_explanation", "TEXT"),
+        ("fraud_evidence", "TEXT"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}"))
+            db.commit()
+        except Exception:
+            db.rollback()
+    db.close()
     
     # 2. Seed Default Admin User and Exchange Rates
     db = SessionLocal()

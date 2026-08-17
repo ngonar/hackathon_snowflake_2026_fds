@@ -28,10 +28,23 @@ def init_db():
             is_fraud INTEGER, -- 0 or 1
             fraud_type TEXT,
             explanation TEXT,
-            decision TEXT, -- FAILED or FUNDED
+            decision TEXT, -- FAILED, SUSPICIOUS, or FUNDED
+            anomaly_score REAL,
+            velocity_flags TEXT,
+            evidence TEXT,
             analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    # Run migration in case columns don't exist yet
+    for col, col_type in [
+        ("anomaly_score", "REAL"),
+        ("velocity_flags", "TEXT"),
+        ("evidence", "TEXT"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE transactions_analysis ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -50,7 +63,10 @@ def save_analysis(
     is_fraud: bool,
     fraud_type: str,
     explanation: str,
-    decision: str
+    decision: str,
+    anomaly_score: float = 0.0,
+    velocity_flags: str = "[]",
+    evidence: str = "[]"
 ):
     """Saves a transaction analysis record into the database."""
     conn = sqlite3.connect(FDS_DB_PATH)
@@ -60,13 +76,13 @@ def save_analysis(
             txn_id, reference_number, sender_id, recipient_id,
             source_currency, target_currency, source_amount, target_amount,
             exchange_rate, fee, status, is_fraud, fraud_type, explanation,
-            decision, analyzed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            decision, anomaly_score, velocity_flags, evidence, analyzed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         txn_id, reference_number, sender_id, recipient_id,
         source_currency, target_currency, source_amount, target_amount,
         exchange_rate, fee, status, 1 if is_fraud else 0, fraud_type, explanation,
-        decision, datetime.datetime.now().isoformat()
+        decision, anomaly_score, velocity_flags, evidence, datetime.datetime.now().isoformat()
     ))
     conn.commit()
     conn.close()

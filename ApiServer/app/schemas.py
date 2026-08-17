@@ -110,6 +110,11 @@ class TransactionResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    
+    anomaly_score: Optional[float] = None
+    velocity_flags: Optional[str] = None
+    fraud_explanation: Optional[str] = None
+    fraud_evidence: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

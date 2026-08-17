@@ -1,0 +1,43 @@
+-- Velocity Check: Detect high-frequency and amount spike anomalies in 24h window
+-- Parameters: :sender_id (INTEGER), :current_amount (FLOAT)
+
+WITH recent_txns AS (
+    SELECT
+        t.SOURCE_AMOUNT,
+        t.RECIPIENT_ID,
+        t.CREATED_AT
+    FROM NGONAROID_FDS.FDS.TRANSACTIONS t
+    WHERE t.SENDER_ID = :sender_id
+      AND t.CREATED_AT >= DATEADD('hour', -24, CURRENT_TIMESTAMP())
+      AND t.STATUS IN ('FUNDED', 'COMPLETED', 'PROCESSING', 'PENDING')
+),
+historical_avg AS (
+    SELECT
+        AVG(SOURCE_AMOUNT) AS AVG_AMOUNT,
+        STDDEV(SOURCE_AMOUNT) AS STDDEV_AMOUNT
+    FROM NGONAROID_FDS.FDS.TRANSACTIONS
+    WHERE SENDER_ID = :sender_id
+      AND STATUS IN ('FUNDED', 'COMPLETED', 'PROCESSING')
+),
+new_recipients_24h AS (
+    SELECT COUNT(DISTINCT rt.RECIPIENT_ID) AS NEW_RCPT_COUNT
+    FROM recent_txns rt
+    WHERE rt.RECIPIENT_ID NOT IN (
+        SELECT DISTINCT t2.RECIPIENT_ID
+        FROM NGONAROID_FDS.FDS.TRANSACTIONS t2
+        WHERE t2.SENDER_ID = :sender_id
+          AND t2.CREATED_AT < DATEADD('hour', -24, CURRENT_TIMESTAMP())
+          AND t2.STATUS IN ('FUNDED', 'COMPLETED', 'PROCESSING')
+    )
+)
+SELECT
+    (SELECT COUNT(*) FROM recent_txns) AS TXN_COUNT_24H,
+    (SELECT COUNT(*) FROM recent_txns) > 5 AS HIGH_FREQUENCY_24H,
+    (SELECT NEW_RCPT_COUNT FROM new_recipients_24h) AS NEW_RECIPIENTS_24H,
+    (SELECT NEW_RCPT_COUNT FROM new_recipients_24h) >= 3 AS NEW_RECIPIENT_BURST,
+    h.AVG_AMOUNT AS HISTORICAL_AVG,
+    h.STDDEV_AMOUNT AS HISTORICAL_STDDEV,
+    :current_amount AS CURRENT_AMOUNT,
+    CASE WHEN h.AVG_AMOUNT > 0 THEN :current_amount / h.AVG_AMOUNT ELSE 0 END AS AMOUNT_RATIO,
+    CASE WHEN h.AVG_AMOUNT > 0 AND :current_amount > h.AVG_AMOUNT * 3 THEN TRUE ELSE FALSE END AS AMOUNT_SPIKE
+FROM historical_avg h;

@@ -57,6 +57,19 @@ def publish_transaction_message(transaction_data: dict):
     except Exception as e:
         logger.error(f"Failed to insert transaction into Snowflake: {str(e)}")
         print(f"Failed to insert transaction into Snowflake: {str(e)}")
+        
+        # Local fallback: invoke FDS Agent directly via HTTP
+        import httpx
+        try:
+            print("Attempting to notify FDS Agent directly via HTTP local fallback...")
+            response = httpx.post(
+                "http://localhost:8002/fds/invoke",
+                json={"input": transaction_data},
+                timeout=10.0
+            )
+            print(f"Direct FDS notification response status: {response.status_code}")
+        except Exception as http_err:
+            print(f"Failed to notify FDS Agent directly: {http_err}")
     finally:
         if conn:
             try:

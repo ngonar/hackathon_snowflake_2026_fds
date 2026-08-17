@@ -1,0 +1,17 @@
+-- Recipient Profile: Bank details and distinct sender count
+-- Parameters: :recipient_id (INTEGER)
+
+SELECT
+    r.ID,
+    r.NAME,
+    r.BANK_NAME,
+    r.ACCOUNT_NUMBER,
+    r.COUNTRY,
+    r.CURRENCY,
+    r.CREATED_AT,
+    DATEDIFF('day', r.CREATED_AT, CURRENT_TIMESTAMP()) AS RECIPIENT_AGE_DAYS,
+    (SELECT COUNT(DISTINCT t.SENDER_ID)
+     FROM NGONAROID_FDS.FDS.TRANSACTIONS t
+     WHERE t.RECIPIENT_ID = r.ID) AS DISTINCT_SENDER_COUNT
+FROM NGONAROID_FDS.FDS.RECIPIENTS r
+WHERE r.ID = :recipient_id;

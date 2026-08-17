@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app import crud, schemas, auth, models
 from app.database import get_db
@@ -45,6 +45,10 @@ def list_all_transactions(db: Session = Depends(get_db)):
 def update_transaction_status(
     txn_id: int,
     status_value: str,
+    anomaly_score: Optional[float] = None,
+    velocity_flags: Optional[str] = None,
+    fraud_explanation: Optional[str] = None,
+    fraud_evidence: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     txn = crud.get_transaction(db, txn_id)
@@ -54,14 +58,22 @@ def update_transaction_status(
             detail="Transaction not found"
         )
         
-    allowed_statuses = ["PENDING", "FUNDED", "PROCESSING", "COMPLETED", "CANCELLED", "FAILED"]
+    allowed_statuses = ["PENDING", "FUNDED", "PROCESSING", "COMPLETED", "CANCELLED", "FAILED", "SUSPICIOUS"]
     if status_value.upper() not in allowed_statuses:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid status. Allowed statuses: {', '.join(allowed_statuses)}"
         )
         
-    return crud.update_transaction_status(db=db, txn_id=txn_id, new_status=status_value.upper())
+    return crud.update_transaction_status(
+        db=db, 
+        txn_id=txn_id, 
+        new_status=status_value.upper(),
+        anomaly_score=anomaly_score,
+        velocity_flags=velocity_flags,
+        fraud_explanation=fraud_explanation,
+        fraud_evidence=fraud_evidence
+    )
 
 
 @router.post("/rates", response_model=schemas.ExchangeRateResponse)

@@ -513,7 +513,7 @@ h1, h2, h3, h4 {
   color: var(--success);
 }
 
-.badge-pending, .badge-pending_approval, .badge-processing {
+.badge-pending, .badge-pending_approval, .badge-processing, .badge-suspicious {
   background: var(--warning-bg);
   border: 1px solid var(--warning-border);
   color: var(--warning);

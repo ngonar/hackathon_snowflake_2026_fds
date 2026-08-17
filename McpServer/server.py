@@ -11,7 +11,7 @@ API_URL = os.environ.get("REMIT_API_URL", "http://localhost:8000").rstrip("/")
 SESSION_FILE = ".session.json"
 
 # Initialize FastMCP Server
-os.environ["FASTMCP_PORT"] = "8080"
+os.environ["FASTMCP_PORT"] = "8001"
 os.environ["FASTMCP_HOST"] = "0.0.0.0"
 mcp = FastMCP("RemitApp")
 
@@ -371,18 +371,39 @@ def list_all_transactions(token: Optional[str] = None) -> Any:
     return make_request("GET", "/admin/transactions", token=token)
 
 @mcp.tool()
-def update_transaction_status(txn_id: int, status_value: str, token: Optional[str] = None) -> Dict[str, Any]:
+def update_transaction_status(
+    txn_id: int, 
+    status_value: str, 
+    anomaly_score: Optional[float] = None,
+    velocity_flags: Optional[str] = None,
+    fraud_explanation: Optional[str] = None,
+    fraud_evidence: Optional[str] = None,
+    token: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    [Admin] Update the status of a specific transaction.
+    [Admin] Update the status of a specific transaction with optional FDS risk information.
 
     Args:
         txn_id: The ID of the transaction.
-        status_value: The new status value (e.g. pending, funded, processing, completed, failed).
+        status_value: The new status value (e.g. pending, funded, processing, completed, failed, suspicious).
+        anomaly_score: Optional anomaly score from FDS.
+        velocity_flags: Optional velocity flags from FDS.
+        fraud_explanation: Optional AI reasoning explanation from FDS.
+        fraud_evidence: Optional AI reasoning key evidence.
         token: Optional custom access token. If not provided, the saved session token will be used.
     """
     params = {
         "status_value": status_value
     }
+    if anomaly_score is not None:
+        params["anomaly_score"] = anomaly_score
+    if velocity_flags is not None:
+        params["velocity_flags"] = velocity_flags
+    if fraud_explanation is not None:
+        params["fraud_explanation"] = fraud_explanation
+    if fraud_evidence is not None:
+        params["fraud_evidence"] = fraud_evidence
+        
     return make_request("POST", f"/admin/transactions/{txn_id}/status", params=params, token=token)
 
 @mcp.tool()
@@ -425,4 +446,4 @@ def get_root() -> Dict[str, Any]:
 if __name__ == "__main__":
     health_thread = threading.Thread(target=start_health_server, daemon=True)
     health_thread.start()
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="streamable-http", port=8001)
