@@ -15,12 +15,13 @@ class User(Base):
     role = Column(String, default="user", nullable=False)  # "user", "admin"
     
     # KYC status
-    kyc_status = Column(String, default="PENDING_SUBMISSION", nullable=False)  # "PENDING_SUBMISSION", "PENDING_APPROVAL", "APPROVED", "REJECTED"
+    kyc_status = Column(String, default="PENDING_SUBMISSION", nullable=False)  # "PENDING_SUBMISSION", "PENDING_APPROVAL", "APPROVED", "REJECTED", "FROZEN"
     kyc_document_type = Column(String, nullable=True)  # "passport", "national_id", "drivers_license"
     kyc_document_number = Column(String, nullable=True)
     
     # Wallet
     wallet_balance = Column(Float, default=0.0, nullable=False)
+    wallet_frozen = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "FROZEN"
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

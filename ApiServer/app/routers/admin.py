@@ -99,3 +99,44 @@ def create_or_update_rate(
         rate=rate_data.rate,
         fee_percentage=rate_data.fee_percentage
     )
+
+
+@router.post("/users/{user_id}/freeze", response_model=schemas.UserResponse)
+def freeze_user_wallet(
+    user_id: int,
+    reason: str = "Fraud risk detected by FDS",
+    db: Session = Depends(get_db)
+):
+    """[Admin] Freeze a user's wallet due to fraud risk. Sets wallet_frozen=FROZEN and kyc_status=FROZEN."""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.wallet_frozen == "FROZEN":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wallet is already frozen")
+    return crud.freeze_user_wallet(db=db, user_id=user_id, reason=reason)
+
+
+@router.post("/users/{user_id}/unfreeze", response_model=schemas.UserResponse)
+def unfreeze_user_wallet(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """[Admin] Unfreeze a user's wallet. Restores wallet_frozen=ACTIVE."""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.wallet_frozen != "FROZEN":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wallet is not frozen")
+    return crud.unfreeze_user_wallet(db=db, user_id=user_id)
+
+
+@router.post("/users/{user_id}/kyc-reverify", response_model=schemas.UserResponse)
+def dispatch_kyc_reverification(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """[Admin] Reset user KYC to force re-verification. Clears KYC documents and sets status to PENDING_SUBMISSION."""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return crud.reset_user_kyc(db=db, user_id=user_id)

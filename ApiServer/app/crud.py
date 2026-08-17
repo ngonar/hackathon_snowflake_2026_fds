@@ -58,6 +58,35 @@ def update_user_balance(db: Session, user_id: int, amount: float) -> Optional[mo
 def get_pending_kyc_users(db: Session) -> List[models.User]:
     return db.query(models.User).filter(models.User.kyc_status == "PENDING_APPROVAL").all()
 
+def freeze_user_wallet(db: Session, user_id: int, reason: str = "Fraud risk detected") -> Optional[models.User]:
+    db_user = get_user(db, user_id)
+    if db_user:
+        db_user.wallet_frozen = "FROZEN"
+        db_user.kyc_status = "FROZEN"
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+def unfreeze_user_wallet(db: Session, user_id: int) -> Optional[models.User]:
+    db_user = get_user(db, user_id)
+    if db_user:
+        db_user.wallet_frozen = "ACTIVE"
+        if db_user.kyc_status == "FROZEN":
+            db_user.kyc_status = "PENDING_SUBMISSION"
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+def reset_user_kyc(db: Session, user_id: int) -> Optional[models.User]:
+    db_user = get_user(db, user_id)
+    if db_user:
+        db_user.kyc_status = "PENDING_SUBMISSION"
+        db_user.kyc_document_type = None
+        db_user.kyc_document_number = None
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
 # ==========================
 # Recipient CRUD
 # ==========================

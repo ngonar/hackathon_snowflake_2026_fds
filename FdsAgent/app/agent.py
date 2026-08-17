@@ -9,7 +9,11 @@ from dotenv import load_dotenv
 
 from app.db import save_analysis
 from app.enrichment import enrich_transaction
-from app.mcp_client import update_transaction_status
+from app.mcp_client import (
+    update_transaction_status, 
+    freeze_wallet, 
+    request_kyc_reverification
+)
 
 load_dotenv()
 
@@ -208,13 +212,25 @@ async def analyze_and_process_txn(txn: dict) -> dict:
             
     print(f"FDS Agent: Analysis finished. is_fraud: {analysis.is_fraud}, type: {analysis.fraud_type}, score: {analysis.anomaly_score}")
     
-    # 3. Determine decision based on fraud evaluation and anomaly score
+    # 3. Determine decision and risk tier based on fraud evaluation and anomaly score
     if analysis.is_fraud:
         decision = "FAILED"
     elif analysis.anomaly_score >= 50.0:
         decision = "SUSPICIOUS"
     else:
         decision = "FUNDED"
+    
+    # Determine risk tier for remediation
+    if analysis.anomaly_score >= 85.0:
+        risk_tier = "CRITICAL"
+    elif analysis.anomaly_score >= 65.0:
+        risk_tier = "HIGH"
+    elif analysis.anomaly_score >= 50.0:
+        risk_tier = "MEDIUM"
+    else:
+        risk_tier = "LOW"
+    
+    print(f"FDS Agent: Risk tier: {risk_tier}, Decision: {decision}")
     
     # 4. Log results to our local SQLite database (fds.db)
     save_analysis(
@@ -238,8 +254,11 @@ async def analyze_and_process_txn(txn: dict) -> dict:
         evidence=json.dumps(analysis.evidence)
     )
     
-    # 5. Call MCP to update the transaction status in the main system
+    # 5. Execute autonomous remediation workflow based on risk tier
+    remediation_actions = []
+    
     try:
+        # Always update transaction status
         await update_transaction_status(
             txn_id=txn.get("id"), 
             status_value=decision,
@@ -248,8 +267,82 @@ async def analyze_and_process_txn(txn: dict) -> dict:
             fraud_explanation=analysis.explanation,
             fraud_evidence=json.dumps(analysis.evidence)
         )
+        remediation_actions.append(f"TXN_STATUS_SET:{decision}")
+        
+        # CRITICAL tier: Full remediation chain
+        if risk_tier == "CRITICAL":
+            print(f"FDS Agent: CRITICAL RISK - Executing full remediation for sender {txn.get('sender_id')}")
+            
+            # Auto-freeze sender wallet
+            freeze_reason = f"Auto-frozen: {analysis.fraud_type} detected (score: {analysis.anomaly_score:.1f})"
+            try:
+                await freeze_wallet(user_id=txn.get("sender_id"), reason=freeze_reason)
+                remediation_actions.append("WALLET_FROZEN")
+                print(f"FDS Agent: Wallet frozen for user {txn.get('sender_id')}")
+            except Exception as e:
+                print(f"FDS Agent: Warning: Wallet freeze failed: {e}")
+                remediation_actions.append(f"WALLET_FREEZE_FAILED:{e}")
+            
+            # Dispatch KYC re-verification
+            try:
+                await request_kyc_reverification(user_id=txn.get("sender_id"))
+                remediation_actions.append("KYC_REVERIFICATION_DISPATCHED")
+                print(f"FDS Agent: KYC re-verification dispatched for user {txn.get('sender_id')}")
+            except Exception as e:
+                print(f"FDS Agent: Warning: KYC re-verification dispatch failed: {e}")
+                remediation_actions.append(f"KYC_REVERIFY_FAILED:{e}")
+            
+        # HIGH tier: Block + flag for review
+        elif risk_tier == "HIGH":
+            print(f"FDS Agent: HIGH RISK - Transaction blocked, flagged for manual review")
+            remediation_actions.append("FLAGGED_MANUAL_REVIEW")
+            
+        # MEDIUM tier: Suspicious flag
+        elif risk_tier == "MEDIUM":
+            print(f"FDS Agent: MEDIUM RISK - Transaction marked suspicious")
+            remediation_actions.append("MONITORING_ACTIVE")
+            
+        # LOW tier: Auto-approved
+        else:
+            print(f"FDS Agent: LOW RISK - Transaction auto-approved")
+            remediation_actions.append("AUTO_APPROVED")
+            
     except Exception as e:
-        print(f"FDS Agent: Warning: MCP update failed: {e}")
+        print(f"FDS Agent: Warning: Remediation workflow error: {e}")
+        remediation_actions.append(f"REMEDIATION_ERROR:{e}")
+    
+    # 6. Log remediation to Snowflake (best-effort)
+    try:
+        conn = _get_snowflake_session()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.REMEDIATION_ACTIONS
+                (TXN_ID, REFERENCE_NUMBER, SENDER_ID, ACTION_TYPE, RISK_TIER,
+                 ANOMALY_SCORE, FRAUD_TYPE, ACTION_DETAILS, STATUS, EXECUTED_AT)
+            SELECT %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), 'EXECUTED', CURRENT_TIMESTAMP()
+            """,
+            (
+                txn.get("id"),
+                txn.get("reference_number"),
+                txn.get("sender_id"),
+                f"REMEDIATION_{risk_tier}",
+                risk_tier,
+                analysis.anomaly_score,
+                analysis.fraud_type,
+                json.dumps({
+                    "decision": decision,
+                    "actions_taken": remediation_actions,
+                    "velocity_flags": analysis.velocity_flags,
+                    "evidence": analysis.evidence
+                })
+            )
+        )
+        cursor.close()
+        conn.close()
+        print(f"FDS Agent: Remediation logged to Snowflake (tier: {risk_tier}, actions: {remediation_actions})")
+    except Exception as e:
+        print(f"FDS Agent: Warning: Failed to log remediation to Snowflake: {e}")
         
     return {
         "txn_id": txn.get("id"),
@@ -260,7 +353,9 @@ async def analyze_and_process_txn(txn: dict) -> dict:
         "anomaly_score": analysis.anomaly_score,
         "velocity_flags": analysis.velocity_flags,
         "evidence": analysis.evidence,
-        "decision": decision
+        "decision": decision,
+        "risk_tier": risk_tier,
+        "remediation_actions": remediation_actions
     }
 
 # Expose the entire process as a LangChain RunnableLambda

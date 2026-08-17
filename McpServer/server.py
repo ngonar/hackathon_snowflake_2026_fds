@@ -443,6 +443,49 @@ def get_root() -> Dict[str, Any]:
     """
     return make_request("GET", "/")
 
+# -----------------
+# Remediation Actions (FDS Autonomous Workflows)
+# -----------------
+
+@mcp.tool()
+def freeze_user_wallet(user_id: int, reason: str = "Fraud risk detected by FDS", token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    [Admin/FDS] Freeze a user's wallet due to detected fraud risk.
+    Sets wallet_frozen=FROZEN and kyc_status=FROZEN, blocking all outbound transfers.
+
+    Args:
+        user_id: The ID of the user whose wallet to freeze.
+        reason: Human-readable reason for the freeze action.
+        token: Optional custom access token. If not provided, the saved session token will be used.
+    """
+    params = {"reason": reason}
+    return make_request("POST", f"/admin/users/{user_id}/freeze", params=params, token=token)
+
+@mcp.tool()
+def unfreeze_user_wallet(user_id: int, token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    [Admin/FDS] Unfreeze a previously frozen user wallet.
+    Restores wallet_frozen=ACTIVE and resets kyc_status to PENDING_SUBMISSION.
+
+    Args:
+        user_id: The ID of the user whose wallet to unfreeze.
+        token: Optional custom access token. If not provided, the saved session token will be used.
+    """
+    return make_request("POST", f"/admin/users/{user_id}/unfreeze", token=token)
+
+@mcp.tool()
+def dispatch_kyc_reverification(user_id: int, token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    [Admin/FDS] Force a user to re-submit KYC verification.
+    Clears existing KYC documents and resets status to PENDING_SUBMISSION.
+    Used as a remediation action when fraud signals suggest identity compromise.
+
+    Args:
+        user_id: The ID of the user to require KYC re-verification.
+        token: Optional custom access token. If not provided, the saved session token will be used.
+    """
+    return make_request("POST", f"/admin/users/{user_id}/kyc-reverify", token=token)
+
 if __name__ == "__main__":
     health_thread = threading.Thread(target=start_health_server, daemon=True)
     health_thread.start()

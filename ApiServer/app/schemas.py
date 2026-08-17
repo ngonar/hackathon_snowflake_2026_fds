@@ -19,6 +19,7 @@ class UserResponse(UserBase):
     kyc_document_type: Optional[str] = None
     kyc_document_number: Optional[str] = None
     wallet_balance: float
+    wallet_frozen: str = "ACTIVE"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

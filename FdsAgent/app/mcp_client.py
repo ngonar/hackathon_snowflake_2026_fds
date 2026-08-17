@@ -67,3 +67,46 @@ async def update_transaction_status(
     except Exception as e:
         print(f"FDS Agent: Failed to update transaction status: {e}")
         raise e
+
+
+async def freeze_wallet(user_id: int, reason: str):
+    """Freezes a user's wallet via the MCP tool."""
+    print(f"FDS Agent: REMEDIATION - Freezing wallet for user {user_id}...")
+    try:
+        response = await call_mcp_tool("freeze_user_wallet", {
+            "user_id": int(user_id),
+            "reason": reason
+        })
+        print(f"FDS Agent: Wallet freeze response: {response}")
+        return response
+    except Exception as e:
+        print(f"FDS Agent: Failed to freeze wallet: {e}")
+        raise e
+
+
+async def unfreeze_wallet(user_id: int):
+    """Unfreezes a user's wallet via the MCP tool."""
+    print(f"FDS Agent: REMEDIATION - Unfreezing wallet for user {user_id}...")
+    try:
+        response = await call_mcp_tool("unfreeze_user_wallet", {
+            "user_id": int(user_id)
+        })
+        print(f"FDS Agent: Wallet unfreeze response: {response}")
+        return response
+    except Exception as e:
+        print(f"FDS Agent: Failed to unfreeze wallet: {e}")
+        raise e
+
+
+async def request_kyc_reverification(user_id: int):
+    """Dispatches a KYC re-verification request via the MCP tool."""
+    print(f"FDS Agent: REMEDIATION - Dispatching KYC re-verification for user {user_id}...")
+    try:
+        response = await call_mcp_tool("dispatch_kyc_reverification", {
+            "user_id": int(user_id)
+        })
+        print(f"FDS Agent: KYC re-verification response: {response}")
+        return response
+    except Exception as e:
+        print(f"FDS Agent: Failed to dispatch KYC re-verification: {e}")
+        raise e
