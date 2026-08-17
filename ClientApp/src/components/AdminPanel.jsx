@@ -2,11 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { 
   Users, ShieldCheck, DollarSign, ListOrdered, CheckCircle2, 
-  XCircle, Edit, RefreshCw, Eye, ArrowRight, HelpCircle 
+  XCircle, Edit, RefreshCw, Eye, ArrowRight, HelpCircle, BrainCircuit 
 } from 'lucide-react';
 import RiskBreakdownCard from './RiskBreakdownCard';
+import FraudInvestigator from './FraudInvestigator';
 
 export default function AdminPanel({ showToast }) {
+  // Tab state
+  const [activeTab, setActiveTab] = useState('controls'); // 'controls' | 'investigator'
+
   // Loading states
   const [loadingKyc, setLoadingKyc] = useState(false);
   const [loadingRates, setLoadingRates] = useState(false);
@@ -151,6 +155,33 @@ export default function AdminPanel({ showToast }) {
   };
 
   return (
+    <div>
+      {/* Tab Navigation */}
+      <div style={{ 
+        display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', 
+        borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem'
+      }}>
+        <button
+          className={`btn btn-sm ${activeTab === 'controls' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveTab('controls')}
+        >
+          <ShieldCheck size={14} /> Admin Controls
+        </button>
+        <button
+          className={`btn btn-sm ${activeTab === 'investigator' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveTab('investigator')}
+        >
+          <BrainCircuit size={14} /> AI Investigator
+        </button>
+      </div>
+
+      {/* AI Investigator Tab */}
+      {activeTab === 'investigator' && (
+        <FraudInvestigator showToast={showToast} />
+      )}
+
+      {/* Admin Controls Tab */}
+      {activeTab === 'controls' && (
     <div className="dashboard-grid">
       
       {/* 1. KYC Approvals Queue */}
@@ -511,6 +542,8 @@ export default function AdminPanel({ showToast }) {
         )}
       </div>
 
+    </div>
+      )}
     </div>
   );
 }

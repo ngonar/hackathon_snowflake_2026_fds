@@ -183,5 +183,12 @@ export const api = {
         fee_percentage: parseFloat(feePercentage)
       }
     });
+  },
+
+  investigateQuery: (query) => {
+    return request('/admin/investigate', {
+      method: 'POST',
+      body: { query }
+    });
   }
 };

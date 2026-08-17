@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from pydantic import BaseModel
 
 from app import crud, schemas, auth, models
 from app.database import get_db
+from app.nl_query import translate_and_execute
 
 router = APIRouter(
     prefix="/admin",
@@ -140,3 +142,35 @@ def dispatch_kyc_reverification(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return crud.reset_user_kyc(db=db, user_id=user_id)
+
+
+class InvestigateRequest(BaseModel):
+    query: str
+
+
+@router.post("/investigate")
+def investigate_fraud(req: InvestigateRequest):
+    """
+    [Admin] Natural language fraud investigation query.
+    Translates natural language to SQL via Cortex AI_COMPLETE, executes against FDS tables,
+    and returns structured results with the generated SQL.
+    """
+    if not req.query or len(req.query.strip()) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query must be at least 3 characters"
+        )
+
+    result = translate_and_execute(req.query.strip())
+
+    if not result.get("success"):
+        return {
+            "success": False,
+            "error": result.get("error", "Unknown error"),
+            "sql": result.get("sql"),
+            "results": [],
+            "columns": [],
+            "row_count": 0
+        }
+
+    return result
