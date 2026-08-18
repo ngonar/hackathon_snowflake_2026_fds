@@ -5,8 +5,8 @@ import { dirname, join, extname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 8080;
-const API_TARGET_HOST = 'remitapp-api-service.gxpx.svc.spcs.internal';
-const API_TARGET_PORT = 8000;
+const API_TARGET_HOST = process.env.API_HOST || 'remitapp-api-service.gxpx.svc.spcs.internal';
+const API_TARGET_PORT = parseInt(process.env.API_PORT || '8000');
 const DIST_DIR = join(__dirname, 'dist');
 
 const MIME_TYPES = {
@@ -37,8 +37,8 @@ const server = http.createServer((req, res) => {
 
     proxyReq.on('error', (err) => {
       console.error('Proxy error:', err.message);
-      res.writeHead(502);
-      res.end('Bad Gateway');
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ detail: 'Backend API service unavailable. Deploy backend services first.' }));
     });
 
     req.pipe(proxyReq);

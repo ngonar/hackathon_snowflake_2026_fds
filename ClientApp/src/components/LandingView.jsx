@@ -269,6 +269,28 @@ export default function LandingView({ onLoginSuccess, showToast }) {
                   </>
                 )}
               </button>
+
+              <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(99,102,241,0.06)', borderRadius: '8px', border: '1px dashed rgba(99,102,241,0.3)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6366f1', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Test Credentials</div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ flex: 1, fontSize: '0.8rem', padding: '0.5rem', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => { setLoginEmail('admin@remit.com'); setLoginPassword('AdminPass123!'); }}
+                  >
+                    Admin
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ flex: 1, fontSize: '0.8rem', padding: '0.5rem', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => { setLoginEmail('user@remit.com'); setLoginPassword('UserPass123!'); }}
+                  >
+                    User
+                  </button>
+                </div>
+              </div>
             </form>
           ) : (
             <form onSubmit={handleRegister}>
