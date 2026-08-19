@@ -1,6 +1,8 @@
 import os
 import json
+import base64
 import snowflake.connector
+from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -54,11 +56,22 @@ RULES:
 """
 
 
+def _load_private_key():
+    key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
+    key_bytes = base64.b64decode(key_b64)
+    private_key = serialization.load_pem_private_key(key_bytes, password=None)
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+
 def _get_snowflake_connection():
     return snowflake.connector.connect(
         account=os.getenv("SNOWFLAKE_ACCOUNT"),
         user=os.getenv("SNOWFLAKE_USER"),
-        password=os.getenv("SNOWFLAKE_PASSWORD"),
+        private_key=_load_private_key(),
         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
         database="SNOWFLAKE_LEARNING_DB",
         schema="FDS",
@@ -95,30 +108,34 @@ def translate_and_execute(natural_language_query: str) -> dict:
         escaped_prompt = prompt.replace("'", "''")
 
         cursor.execute(f"""
-            SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
-                'llama4-maverick',
-                '{escaped_prompt}',
-                {{'max_tokens': 1024, 'temperature': 0}}
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                'llama3.1-70b',
+                '{escaped_prompt}'
             )
         """)
         row = cursor.fetchone()
-        raw_response = row[0]
-
-        # Parse response (AI_COMPLETE with options returns JSON with choices)
-        try:
-            response_obj = json.loads(raw_response)
-            if "choices" in response_obj:
-                generated_sql = response_obj["choices"][0]["messages"].strip()
-            else:
-                generated_sql = raw_response.strip()
-        except (json.JSONDecodeError, KeyError):
-            generated_sql = raw_response.strip()
+        generated_sql = row[0].strip()
 
         # Clean up markdown formatting if present
         if generated_sql.startswith('```'):
             lines = generated_sql.split('\n')
             lines = [l for l in lines if not l.startswith('```')]
             generated_sql = '\n'.join(lines).strip()
+
+        # Strip any preamble text before the actual SQL statement
+        for keyword in ('SELECT', 'WITH'):
+            idx = generated_sql.upper().find(keyword)
+            if idx > 0:
+                generated_sql = generated_sql[idx:]
+                break
+
+        # Remove trailing explanation or text after the SQL statement
+        # Find the last semicolon and truncate after it
+        semi_idx = generated_sql.rfind(';')
+        if semi_idx > 0:
+            generated_sql = generated_sql[:semi_idx + 1]
+        # Remove trailing semicolons for execution
+        generated_sql = generated_sql.rstrip(';').strip()
 
         # Step 2: Validate query safety
         if not _validate_query_safety(generated_sql):

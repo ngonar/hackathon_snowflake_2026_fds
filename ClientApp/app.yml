@@ -5,4 +5,5 @@ profile:
 
 launch:
   web:
+    install: "npm install && npm run build"
     command: "node server.js"

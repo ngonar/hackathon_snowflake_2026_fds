@@ -1,14 +1,15 @@
 import os
 import json
 import asyncio
+import base64
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableLambda
 import snowflake.connector
+from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
 from app.db import save_analysis
-from app.enrichment import enrich_transaction
 from app.mcp_client import (
     update_transaction_status, 
     freeze_wallet, 
@@ -17,12 +18,24 @@ from app.mcp_client import (
 
 load_dotenv()
 
+
+def _load_private_key():
+    key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY")
+    key_bytes = base64.b64decode(key_b64)
+    private_key = serialization.load_pem_private_key(key_bytes, password=None)
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+
 def _get_snowflake_session():
     """Create a Snowflake connection for Cortex Complete calls."""
     return snowflake.connector.connect(
         account=os.getenv("SNOWFLAKE_ACCOUNT"),
         user=os.getenv("SNOWFLAKE_USER"),
-        password=os.getenv("SNOWFLAKE_PASSWORD"),
+        private_key=_load_private_key(),
         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
         database=os.getenv("SNOWFLAKE_DATABASE"),
         schema=os.getenv("SNOWFLAKE_SCHEMA"),
@@ -123,7 +136,7 @@ async def call_cortex_complete(prompt: str) -> FraudAnalysisResult:
         escaped_prompt = prompt.replace("'", "''")
         sql = f"""
             SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                'llama4-maverick',
+                'llama3.1-70b',
                 '{escaped_prompt}',
                 {{'max_tokens': 4096, 'temperature': 0}}
             )

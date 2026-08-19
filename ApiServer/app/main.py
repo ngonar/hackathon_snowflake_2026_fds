@@ -14,14 +14,18 @@ async def lifespan(app: FastAPI):
     
     # Run migrations/alters for SQLite columns if not present
     db = SessionLocal()
-    for col, col_type in [
-        ("anomaly_score", "FLOAT"),
-        ("velocity_flags", "TEXT"),
-        ("fraud_explanation", "TEXT"),
-        ("fraud_evidence", "TEXT"),
+    for table, col, col_type, default in [
+        ("transactions", "anomaly_score", "FLOAT", None),
+        ("transactions", "velocity_flags", "TEXT", None),
+        ("transactions", "fraud_explanation", "TEXT", None),
+        ("transactions", "fraud_evidence", "TEXT", None),
+        ("users", "wallet_frozen", "TEXT", "'ACTIVE'"),
     ]:
         try:
-            db.execute(text(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}"))
+            alter_sql = f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
+            if default:
+                alter_sql += f" DEFAULT {default}"
+            db.execute(text(alter_sql))
             db.commit()
         except Exception:
             db.rollback()
@@ -41,9 +45,22 @@ async def lifespan(app: FastAPI):
             )
             created_admin = crud.create_user(db, admin_create, role="admin")
             crud.approve_user_kyc(db, created_admin.id, approve=True)
-            # Add some initial admin wallet balance just in case
             crud.update_user_balance(db, created_admin.id, 10000.0)
             print(f"Default admin user seeded: {admin_email}")
+
+        # Seed Test User
+        test_email = "user@remit.com"
+        test_user = crud.get_user_by_email(db, test_email)
+        if not test_user:
+            test_create = schemas.UserCreate(
+                email=test_email,
+                full_name="Test User",
+                password="UserPass123!"
+            )
+            created_test = crud.create_user(db, test_create, role="user")
+            crud.approve_user_kyc(db, created_test.id, approve=True)
+            crud.update_user_balance(db, created_test.id, 5000.0)
+            print(f"Default test user seeded: {test_email}")
             
         # Seed Exchange Rates
         default_rates = [

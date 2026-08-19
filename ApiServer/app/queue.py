@@ -1,10 +1,22 @@
 import logging
+import base64
 
 import snowflake.connector
+from cryptography.hazmat.primitives import serialization
 
 from app.config import settings
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _load_private_key():
+    key_bytes = base64.b64decode(settings.SNOWFLAKE_PRIVATE_KEY)
+    private_key = serialization.load_pem_private_key(key_bytes, password=None)
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
 
 
 def publish_transaction_message(transaction_data: dict):
@@ -17,7 +29,7 @@ def publish_transaction_message(transaction_data: dict):
         conn = snowflake.connector.connect(
             account=settings.SNOWFLAKE_ACCOUNT,
             user=settings.SNOWFLAKE_USER,
-            password=settings.SNOWFLAKE_PASSWORD,
+            private_key=_load_private_key(),
             warehouse=settings.SNOWFLAKE_WAREHOUSE,
             database=settings.SNOWFLAKE_DATABASE,
             schema=settings.SNOWFLAKE_SCHEMA,

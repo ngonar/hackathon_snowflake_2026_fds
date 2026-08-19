@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
 
-EXPOSE 8080 8081
+EXPOSE 8001 8081
 
 CMD ["python", "server.py"]

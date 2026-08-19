@@ -1,7 +1,7 @@
 spec:
   containers:
     - name: mcp-server
-      image: /REMITAPP_DB/REMITAPP_SCHEMA/IMAGE_REPO/remitapp-mcp:latest
+      image: /snowflake_learning_db/fds/fds_repo/remitapp-mcp:latest
       env:
         REMIT_API_URL: http://REMITAPP_API_SERVICE:8000
       readinessProbe:
@@ -16,5 +16,5 @@ spec:
           memory: 1G
   endpoints:
     - name: mcp-endpoint
-      port: 8080
+      port: 8001
       public: true
