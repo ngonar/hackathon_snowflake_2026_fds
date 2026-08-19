@@ -37,11 +37,11 @@ def publish_transaction_message(transaction_data: dict):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO REMITTANCE_TRX
-                (ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID,
+            INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS
+                (TXN_ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID,
                  SOURCE_CURRENCY, TARGET_CURRENCY, SOURCE_AMOUNT, TARGET_AMOUNT,
-                 EXCHANGE_RATE, FEE, STATUS, CREATED_AT, UPDATED_AT)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 EXCHANGE_RATE, FEE, STATUS)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 transaction_data.get("id"),
@@ -55,15 +55,13 @@ def publish_transaction_message(transaction_data: dict):
                 transaction_data.get("exchange_rate"),
                 transaction_data.get("fee"),
                 transaction_data.get("status"),
-                transaction_data.get("created_at"),
-                transaction_data.get("updated_at"),
             ),
         )
         cursor.close()
 
         logger.info(
             f"Successfully inserted transaction {transaction_data.get('reference_number')} "
-            f"into Snowflake table {settings.SNOWFLAKE_DATABASE}.{settings.SNOWFLAKE_SCHEMA}.REMITTANCE_TRX"
+            f"into Snowflake table SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS"
         )
 
     except Exception as e:
