@@ -65,13 +65,32 @@ def get_headers(token: Optional[str] = None) -> Dict[str, str]:
         headers["Authorization"] = f"Bearer {t}"
     return headers
 
+def _relogin() -> Optional[str]:
+    """Re-authenticates as admin and returns the new token."""
+    try:
+        resp = requests.post(
+            f"{API_URL}/auth/token",
+            data={"username": "admin@remit.com", "password": "AdminPass123!"},
+            timeout=15
+        )
+        resp.raise_for_status()
+        token = resp.json().get("access_token")
+        if token:
+            save_token(token)
+        return token
+    except Exception as e:
+        print(f"MCP Server: Auto-relogin failed: {e}")
+        return None
+
+
 def make_request(
     method: str,
     path: str,
     json_data: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
     data: Optional[Dict[str, Any]] = None,
-    token: Optional[str] = None
+    token: Optional[str] = None,
+    _retried: bool = False
 ) -> Any:
     """Utility function to make HTTP requests to the RemitApp API and handle errors."""
     url = f"{API_URL}{path}"
@@ -102,6 +121,13 @@ def make_request(
             return {"text": response.text}
             
     except requests.exceptions.HTTPError as e:
+        # Auto-retry on 401 by re-authenticating
+        if response.status_code == 401 and not _retried and token is None:
+            new_token = _relogin()
+            if new_token:
+                return make_request(method, path, json_data=json_data, params=params,
+                                    data=data, token=new_token, _retried=True)
+
         try:
             detail = response.json()
         except ValueError:

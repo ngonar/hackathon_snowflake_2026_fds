@@ -1,89 +1,102 @@
 import os
-import sqlite3
+import base64
+import snowflake.connector
+from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
 load_dotenv()
 
-REMIT_DB_PATH = os.getenv("REMIT_DB_PATH")
+
+def _load_private_key():
+    key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
+    key_bytes = base64.b64decode(key_b64)
+    private_key = serialization.load_pem_private_key(key_bytes, password=None)
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
 
 def _get_connection():
-    conn = sqlite3.connect(REMIT_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        private_key=_load_private_key(),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB"),
+        schema=os.getenv("SNOWFLAKE_SCHEMA", "FDS"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+    )
+
 
 def get_sender_profile(sender_id: int) -> dict:
-    """Retrieves user profile details from the main database."""
     conn = _get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE id = ?", (sender_id,))
+    cursor = conn.cursor(snowflake.connector.DictCursor)
+    cursor.execute("SELECT * FROM USERS WHERE ID = %s", (sender_id,))
     row = cursor.fetchone()
     conn.close()
-    if row:
-        return dict(row)
-    return {}
+    return dict(row) if row else {}
+
 
 def get_recipient_profile(recipient_id: int) -> dict:
-    """Retrieves recipient details from the main database."""
     conn = _get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM recipients WHERE id = ?", (recipient_id,))
+    cursor = conn.cursor(snowflake.connector.DictCursor)
+    cursor.execute("SELECT * FROM RECIPIENTS WHERE ID = %s", (recipient_id,))
     row = cursor.fetchone()
     conn.close()
-    if row:
-        return dict(row)
-    return {}
+    return dict(row) if row else {}
+
 
 def get_sender_transaction_history(sender_id: int) -> list[dict]:
-    """Retrieves transaction history for a sender from the main database."""
     conn = _get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(snowflake.connector.DictCursor)
     cursor.execute("""
-        SELECT t.*, r.name as recipient_name 
-        FROM transactions t
-        LEFT JOIN recipients r ON t.recipient_id = r.id
-        WHERE t.sender_id = ? 
-        ORDER BY t.created_at DESC
+        SELECT T.*, R.NAME as RECIPIENT_NAME
+        FROM TRANSACTIONS T
+        LEFT JOIN RECIPIENTS R ON T.RECIPIENT_ID = R.ID
+        WHERE T.SENDER_ID = %s
+        ORDER BY T.CREATED_AT DESC
+        LIMIT 20
     """, (sender_id,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
+
 def get_recipient_transaction_history(recipient_id: int) -> list[dict]:
-    """Retrieves transaction history for a recipient from the main database."""
     conn = _get_connection()
-    cursor = conn.cursor()
-    # Note: recipients are linked to transactions via recipient_id
+    cursor = conn.cursor(snowflake.connector.DictCursor)
     cursor.execute("""
-        SELECT t.*, u.full_name as sender_name 
-        FROM transactions t
-        LEFT JOIN users u ON t.sender_id = u.id
-        WHERE t.recipient_id = ? 
-        ORDER BY t.created_at DESC
+        SELECT T.*, U.FULL_NAME as SENDER_NAME
+        FROM TRANSACTIONS T
+        LEFT JOIN USERS U ON T.SENDER_ID = U.ID
+        WHERE T.RECIPIENT_ID = %s
+        ORDER BY T.CREATED_AT DESC
+        LIMIT 20
     """, (recipient_id,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
+
 def enrich_transaction(txn_data: dict) -> dict:
-    """Enriches the transaction details with sender, recipient, and transaction history."""
     sender_id = txn_data.get("sender_id")
     recipient_id = txn_data.get("recipient_id")
-    
+
     sender_profile = get_sender_profile(sender_id) if sender_id else {}
     recipient_profile = get_recipient_profile(recipient_id) if recipient_id else {}
-    
+
     sender_history = get_sender_transaction_history(sender_id) if sender_id else []
     recipient_history = get_recipient_transaction_history(recipient_id) if recipient_id else []
-    
-    # We remove hashed_password from user profile to prevent sending it to the LLM (security best practice)
+
     if sender_profile:
-        sender_profile.pop("hashed_password", None)
-        
-    enriched_data = {
+        sender_profile.pop("HASHED_PASSWORD", None)
+
+    return {
         "transaction": txn_data,
         "sender": sender_profile,
         "recipient": recipient_profile,
         "sender_history": sender_history,
         "recipient_history": recipient_history
     }
-    return enriched_data

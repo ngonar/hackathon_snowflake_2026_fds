@@ -10,7 +10,10 @@ load_dotenv()
 FDS_SCHEMA_CONTEXT = """
 You have access to the following Snowflake tables in SNOWFLAKE_LEARNING_DB.FDS:
 
-TABLE: TRANSACTIONS
+TABLE: PENDING_TRANSACTIONS (this is the primary transactions table - use this for transaction lookups)
+Columns: ID (INTEGER), TXN_ID (INTEGER), REFERENCE_NUMBER (VARCHAR), SENDER_ID (INTEGER), RECIPIENT_ID (INTEGER), SOURCE_CURRENCY (VARCHAR), TARGET_CURRENCY (VARCHAR), SOURCE_AMOUNT (FLOAT), TARGET_AMOUNT (FLOAT), EXCHANGE_RATE (FLOAT), FEE (FLOAT), STATUS (VARCHAR: PENDING/FUNDED/PROCESSING/COMPLETED/CANCELLED/FAILED/SUSPICIOUS), CREATED_AT (TIMESTAMP_NTZ), PROCESSED (BOOLEAN)
+
+TABLE: TRANSACTIONS (legacy - may be empty, prefer PENDING_TRANSACTIONS)
 Columns: ID (INTEGER), REFERENCE_NUMBER (VARCHAR), SENDER_ID (INTEGER), RECIPIENT_ID (INTEGER), SOURCE_CURRENCY (VARCHAR), TARGET_CURRENCY (VARCHAR), SOURCE_AMOUNT (FLOAT), TARGET_AMOUNT (FLOAT), EXCHANGE_RATE (FLOAT), FEE (FLOAT), STATUS (VARCHAR: PENDING/FUNDED/PROCESSING/COMPLETED/CANCELLED/FAILED/SUSPICIOUS), CREATED_AT (TIMESTAMP_NTZ), UPDATED_AT (TIMESTAMP_NTZ)
 
 TABLE: USERS
@@ -32,10 +35,11 @@ TABLE: KYC_REVERIFICATION_QUEUE
 Columns: ID (INTEGER), USER_ID (INTEGER), TXN_ID (INTEGER), PRIORITY (VARCHAR: URGENT/HIGH/NORMAL), REASON (VARCHAR), FRAUD_TYPE (VARCHAR), ANOMALY_SCORE (FLOAT), QUEUED_AT (TIMESTAMP_NTZ), PROCESSED_AT (TIMESTAMP_NTZ), STATUS (VARCHAR: PENDING/PROCESSED)
 
 Common joins:
-- TRANSACTIONS.SENDER_ID = USERS.ID
-- TRANSACTIONS.RECIPIENT_ID = RECIPIENTS.ID
-- FRAUD_ANALYSIS_LOG.TXN_ID = TRANSACTIONS.ID
-- REMEDIATION_ACTIONS.TXN_ID = TRANSACTIONS.ID
+- PENDING_TRANSACTIONS.SENDER_ID = USERS.ID
+- PENDING_TRANSACTIONS.RECIPIENT_ID = RECIPIENTS.ID
+- PENDING_TRANSACTIONS.REFERENCE_NUMBER = REMEDIATION_ACTIONS.REFERENCE_NUMBER
+- PENDING_TRANSACTIONS.REFERENCE_NUMBER = FRAUD_ANALYSIS_LOG.REFERENCE_NUMBER
+- REMEDIATION_ACTIONS.TXN_ID = PENDING_TRANSACTIONS.TXN_ID
 - WALLET_FREEZE_LOG.USER_ID = USERS.ID
 """
 
@@ -116,6 +120,13 @@ def translate_and_execute(natural_language_query: str) -> dict:
         row = cursor.fetchone()
         generated_sql = row[0].strip()
 
+        # The LLM output may have doubled single quotes from Snowflake string escaping
+        # e.g. ''REMIT-123'' instead of 'REMIT-123' - fix this
+        import re
+        generated_sql = re.sub(r"''([^']+)''", r"'\1'", generated_sql)
+
+        print(f"NL Query: Generated SQL: {generated_sql}")
+
         # Clean up markdown formatting if present
         if generated_sql.startswith('```'):
             lines = generated_sql.split('\n')
@@ -146,8 +157,39 @@ def translate_and_execute(natural_language_query: str) -> dict:
                 "results": []
             }
 
-        # Step 3: Execute the generated SQL
-        cursor.execute(generated_sql)
+        # Step 3: Execute the generated SQL (with one retry on compilation error)
+        try:
+            cursor.execute(generated_sql)
+        except Exception as sql_err:
+            if "SQL compilation error" in str(sql_err):
+                # Retry: ask the model to fix the query
+                fix_prompt = (
+                    f"{SYSTEM_PROMPT}\n\n"
+                    f"The following SQL query failed with this error:\n"
+                    f"Query: {generated_sql}\n"
+                    f"Error: {str(sql_err)}\n\n"
+                    f"Please generate a corrected SQL query. Return ONLY the SQL, no explanation.\n\nSQL:"
+                )
+                escaped_fix = fix_prompt.replace("'", "''")
+                cursor.execute(f"""
+                    SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-70b', '{escaped_fix}')
+                """)
+                fixed_sql = cursor.fetchone()[0].strip()
+                if fixed_sql.startswith('```'):
+                    lines = fixed_sql.split('\n')
+                    lines = [l for l in lines if not l.startswith('```')]
+                    fixed_sql = '\n'.join(lines).strip()
+                for keyword in ('SELECT', 'WITH'):
+                    idx = fixed_sql.upper().find(keyword)
+                    if idx > 0:
+                        fixed_sql = fixed_sql[idx:]
+                        break
+                fixed_sql = fixed_sql.rstrip(';').strip()
+                generated_sql = fixed_sql
+                cursor.execute(generated_sql)
+            else:
+                raise
+
         columns = [desc[0] for desc in cursor.description]
         rows = cursor.fetchall()
 

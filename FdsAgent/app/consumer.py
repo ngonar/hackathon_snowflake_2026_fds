@@ -15,6 +15,7 @@ load_dotenv()
 SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT")
 SNOWFLAKE_USER = os.getenv("SNOWFLAKE_USER")
 SNOWFLAKE_PRIVATE_KEY_B64 = os.getenv("SNOWFLAKE_PRIVATE_KEY")
+SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD")
 SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE")
 SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB")
 SNOWFLAKE_SCHEMA = os.getenv("SNOWFLAKE_SCHEMA", "FDS")
@@ -27,6 +28,8 @@ _stop_event = threading.Event()
 
 
 def _load_private_key():
+    if not SNOWFLAKE_PRIVATE_KEY_B64:
+        return None
     key_bytes = base64.b64decode(SNOWFLAKE_PRIVATE_KEY_B64)
     private_key = serialization.load_pem_private_key(key_bytes, password=None)
     return private_key.private_bytes(
@@ -37,15 +40,20 @@ def _load_private_key():
 
 
 def _get_connection():
-    return snowflake.connector.connect(
-        account=SNOWFLAKE_ACCOUNT,
-        user=SNOWFLAKE_USER,
-        private_key=_load_private_key(),
-        warehouse=SNOWFLAKE_WAREHOUSE,
-        database=SNOWFLAKE_DATABASE,
-        schema=SNOWFLAKE_SCHEMA,
-        role=SNOWFLAKE_ROLE,
-    )
+    conn_params = {
+        "account": SNOWFLAKE_ACCOUNT,
+        "user": SNOWFLAKE_USER,
+        "warehouse": SNOWFLAKE_WAREHOUSE,
+        "database": SNOWFLAKE_DATABASE,
+        "schema": SNOWFLAKE_SCHEMA,
+        "role": SNOWFLAKE_ROLE,
+    }
+    private_key = _load_private_key()
+    if private_key:
+        conn_params["private_key"] = private_key
+    else:
+        conn_params["password"] = SNOWFLAKE_PASSWORD
+    return snowflake.connector.connect(**conn_params)
 
 
 def start_stream_consumer():

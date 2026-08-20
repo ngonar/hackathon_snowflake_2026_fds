@@ -26,7 +26,7 @@ async function request(path, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  if (options.body && !(options.body instanceof URLSearchParams)) {
+  if (options.body && !(options.body instanceof URLSearchParams) && !(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(options.body);
   }
@@ -145,6 +145,15 @@ export const api = {
         recipient_id: parseInt(recipientId),
         source_amount: parseFloat(sourceAmount)
       }
+    });
+  },
+
+  bulkTransfer: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request('/transactions/bulk', {
+      method: 'POST',
+      body: formData
     });
   },
 

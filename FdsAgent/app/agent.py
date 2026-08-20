@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
 from app.db import save_analysis
+from app.enrichment import enrich_transaction
 from app.mcp_client import (
     update_transaction_status, 
     freeze_wallet, 
@@ -21,6 +22,8 @@ load_dotenv()
 
 def _load_private_key():
     key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY")
+    if not key_b64:
+        return None
     key_bytes = base64.b64decode(key_b64)
     private_key = serialization.load_pem_private_key(key_bytes, password=None)
     return private_key.private_bytes(
@@ -32,15 +35,20 @@ def _load_private_key():
 
 def _get_snowflake_session():
     """Create a Snowflake connection for Cortex Complete calls."""
-    return snowflake.connector.connect(
-        account=os.getenv("SNOWFLAKE_ACCOUNT"),
-        user=os.getenv("SNOWFLAKE_USER"),
-        private_key=_load_private_key(),
-        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
-        database=os.getenv("SNOWFLAKE_DATABASE"),
-        schema=os.getenv("SNOWFLAKE_SCHEMA"),
-        role=os.getenv("SNOWFLAKE_ROLE"),
-    )
+    conn_params = {
+        "account": os.getenv("SNOWFLAKE_ACCOUNT"),
+        "user": os.getenv("SNOWFLAKE_USER"),
+        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
+        "database": os.getenv("SNOWFLAKE_DATABASE"),
+        "schema": os.getenv("SNOWFLAKE_SCHEMA"),
+        "role": os.getenv("SNOWFLAKE_ROLE"),
+    }
+    private_key = _load_private_key()
+    if private_key:
+        conn_params["private_key"] = private_key
+    else:
+        conn_params["password"] = os.getenv("SNOWFLAKE_PASSWORD")
+    return snowflake.connector.connect(**conn_params)
 
 # Define Pydantic model for structured output
 class FraudAnalysisResult(BaseModel):
@@ -133,18 +141,18 @@ async def call_cortex_complete(prompt: str) -> FraudAnalysisResult:
     conn = _get_snowflake_session()
     try:
         cursor = conn.cursor()
-        escaped_prompt = prompt.replace("'", "''")
-        sql = f"""
+        messages = json.dumps([{"role": "user", "content": prompt}])
+        options = json.dumps({"max_tokens": 4096, "temperature": 0})
+        sql = """
             SELECT SNOWFLAKE.CORTEX.COMPLETE(
                 'llama3.1-70b',
-                '{escaped_prompt}',
-                {{'max_tokens': 4096, 'temperature': 0}}
+                PARSE_JSON(%s),
+                PARSE_JSON(%s)
             )
         """
-        cursor.execute(sql)
+        cursor.execute(sql, (messages, options))
         row = cursor.fetchone()
         raw_response = row[0]
-        # The SQL COMPLETE with options returns a JSON object with choices
         response_obj = json.loads(raw_response)
         if "choices" in response_obj:
             content = response_obj["choices"][0]["messages"]

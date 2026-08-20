@@ -1,48 +1,38 @@
 import logging
-import base64
-
+import httpx
 import snowflake.connector
-from cryptography.hazmat.primitives import serialization
 
 from app.config import settings
 
 logger = logging.getLogger("uvicorn.error")
 
-
-def _load_private_key():
-    key_bytes = base64.b64decode(settings.SNOWFLAKE_PRIVATE_KEY)
-    private_key = serialization.load_pem_private_key(key_bytes, password=None)
-    return private_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
+FDS_AGENT_URL = "http://fds-agent-service.gxpx.svc.spcs.internal:8080/fds/invoke"
 
 
-def publish_transaction_message(transaction_data: dict):
-    """
-    Inserts transaction details into Snowflake table REMITTANCE_TRX.
-    A stream and task on the Snowflake side handle downstream processing.
-    """
-    conn = None
+def _get_snowflake_connection():
+    conn_params = {
+        "account": settings.SNOWFLAKE_ACCOUNT,
+        "user": settings.SNOWFLAKE_USER,
+        "warehouse": settings.SNOWFLAKE_WAREHOUSE,
+        "database": settings.SNOWFLAKE_DATABASE,
+        "schema": settings.SNOWFLAKE_SCHEMA,
+    }
+    if settings.SNOWFLAKE_PASSWORD:
+        conn_params["password"] = settings.SNOWFLAKE_PASSWORD
+    return snowflake.connector.connect(**conn_params)
+
+
+def _insert_pending_transaction(transaction_data: dict):
+    """Insert transaction into PENDING_TRANSACTIONS for audit trail and fallback processing."""
     try:
-        conn = snowflake.connector.connect(
-            account=settings.SNOWFLAKE_ACCOUNT,
-            user=settings.SNOWFLAKE_USER,
-            private_key=_load_private_key(),
-            warehouse=settings.SNOWFLAKE_WAREHOUSE,
-            database=settings.SNOWFLAKE_DATABASE,
-            schema=settings.SNOWFLAKE_SCHEMA,
-        )
+        conn = _get_snowflake_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """
-            INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS
-                (TXN_ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID,
-                 SOURCE_CURRENCY, TARGET_CURRENCY, SOURCE_AMOUNT, TARGET_AMOUNT,
-                 EXCHANGE_RATE, FEE, STATUS)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
+            """INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS 
+            (TXN_ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID, 
+             SOURCE_CURRENCY, TARGET_CURRENCY, SOURCE_AMOUNT, TARGET_AMOUNT,
+             EXCHANGE_RATE, FEE, STATUS, PROCESSED)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)""",
             (
                 transaction_data.get("id"),
                 transaction_data.get("reference_number"),
@@ -54,35 +44,45 @@ def publish_transaction_message(transaction_data: dict):
                 transaction_data.get("target_amount"),
                 transaction_data.get("exchange_rate"),
                 transaction_data.get("fee"),
-                transaction_data.get("status"),
+                transaction_data.get("status", "PENDING"),
             ),
         )
-        cursor.close()
-
+        conn.close()
         logger.info(
-            f"Successfully inserted transaction {transaction_data.get('reference_number')} "
-            f"into Snowflake table SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS"
+            f"Inserted transaction {transaction_data.get('reference_number')} "
+            f"into PENDING_TRANSACTIONS"
         )
-
     except Exception as e:
-        logger.error(f"Failed to insert transaction into Snowflake: {str(e)}")
-        print(f"Failed to insert transaction into Snowflake: {str(e)}")
-        
-        # Local fallback: invoke FDS Agent directly via HTTP
-        import httpx
-        try:
-            print("Attempting to notify FDS Agent directly via HTTP local fallback...")
-            response = httpx.post(
-                "http://localhost:8002/fds/invoke",
-                json={"input": transaction_data},
-                timeout=10.0
+        logger.error(f"Failed to insert into PENDING_TRANSACTIONS: {str(e)}")
+
+
+def publish_transaction_message(transaction_data: dict):
+    """
+    Sends transaction to the FDS Agent for fraud analysis via internal SPCS network,
+    and inserts into PENDING_TRANSACTIONS for audit trail.
+    """
+    # Always insert into Snowflake PENDING_TRANSACTIONS for audit/fallback
+    _insert_pending_transaction(transaction_data)
+
+    try:
+        response = httpx.post(
+            FDS_AGENT_URL,
+            json={"input": transaction_data},
+            timeout=30.0,
+        )
+        if response.status_code == 200:
+            logger.info(
+                f"Successfully sent transaction {transaction_data.get('reference_number')} "
+                f"to FDS Agent for processing"
             )
-            print(f"Direct FDS notification response status: {response.status_code}")
-        except Exception as http_err:
-            print(f"Failed to notify FDS Agent directly: {http_err}")
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        else:
+            logger.warning(
+                f"FDS Agent returned status {response.status_code} for "
+                f"transaction {transaction_data.get('reference_number')}: {response.text}"
+            )
+    except Exception as e:
+        logger.error(f"Failed to send transaction to FDS Agent: {str(e)}")
+        logger.info(
+            f"Transaction {transaction_data.get('reference_number')} will be picked up "
+            f"by the FDS Agent's polling consumer from PENDING_TRANSACTIONS"
+        )

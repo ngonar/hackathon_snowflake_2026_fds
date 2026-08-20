@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { 
   User, Wallet, Shield, Users, CreditCard, Send, History, 
-  Plus, Check, X, RefreshCw, AlertTriangle, ArrowRight, HelpCircle 
+  Plus, Check, X, RefreshCw, AlertTriangle, ArrowRight, HelpCircle, Upload, FileText 
 } from 'lucide-react';
 import RiskBreakdownCard from './RiskBreakdownCard';
 
@@ -13,7 +13,7 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
   const [loadingRecipients, setLoadingRecipients] = useState(false);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [sendingMoney, setSendingMoney] = useState(false);
-  const [fundingTxnId, setFundingTxnId] = useState(null);
+
 
   // FDS risk breakdown expansion state
   const [expandedTxnIds, setExpandedTxnIds] = useState({});
@@ -49,6 +49,12 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
   const [sendAmount, setSendAmount] = useState('');
   const [sendEstimate, setSendEstimate] = useState(null);
   const [estimating, setEstimating] = useState(false);
+
+  // Bulk transfer states
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkFile, setBulkFile] = useState(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
 
   // Fetch initial dashboard data
   useEffect(() => {
@@ -219,22 +225,27 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
     }
   };
 
-  const handleFundTransaction = async (txnId, totalCost) => {
-    if (user.wallet_balance < totalCost) {
-      showToast(`Insufficient funds. You need $${totalCost.toFixed(2)} USD but only have $${user.wallet_balance.toFixed(2)} USD.`, 'error');
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!bulkFile) {
+      showToast('Please select a CSV file', 'warning');
       return;
     }
-
-    setFundingTxnId(txnId);
+    setBulkUploading(true);
+    setBulkResult(null);
     try {
-      await api.fundTransaction(txnId);
-      showToast('Transaction funded successfully! Payout processing started.', 'success');
-      onRefreshUser();
-      await fetchTransactions();
+      const result = await api.bulkTransfer(bulkFile);
+      setBulkResult(result);
+      if (result.successful.length > 0) {
+        showToast(`Bulk transfer: ${result.successful.length} succeeded, ${result.failed.length} failed`, 'success');
+        await fetchTransactions();
+      } else {
+        showToast(`Bulk transfer: all ${result.failed.length} rows failed`, 'error');
+      }
     } catch (err) {
-      showToast(err.message || 'Funding failed', 'error');
+      showToast(err.message || 'Bulk transfer failed', 'error');
     } finally {
-      setFundingTxnId(null);
+      setBulkUploading(false);
     }
   };
 
@@ -519,6 +530,15 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
             <Send className="text-primary" style={{ color: 'var(--primary)' }} />
             <h3>Send Money</h3>
           </div>
+          {user.kyc_status === 'APPROVED' && recipients.length > 0 && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => { setBulkMode(!bulkMode); setBulkResult(null); setBulkFile(null); }}
+            >
+              {bulkMode ? <Send size={14} /> : <Upload size={14} />}
+              {bulkMode ? 'Single Transfer' : 'Bulk CSV'}
+            </button>
+          )}
         </div>
 
         {user.kyc_status !== 'APPROVED' ? (
@@ -536,6 +556,81 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
             <span style={{ fontSize: '0.85rem' }}>
               Please add at least one recipient bank account in the Recipients card before starting a transfer.
             </span>
+          </div>
+        ) : bulkMode ? (
+          <div>
+            <div style={{ background: 'rgba(99,102,241,0.06)', borderRadius: '0.5rem', padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              <FileText size={14} style={{ display: 'inline', marginRight: '0.4rem', verticalAlign: 'middle' }} />
+              Upload a CSV file with columns: <code>recipient_id</code>, <code>source_amount</code>
+            </div>
+
+            <form onSubmit={handleBulkUpload}>
+              <div className="form-group">
+                <label>CSV File</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="input-control"
+                  style={{ padding: '0.5rem' }}
+                  onChange={(e) => { setBulkFile(e.target.files[0] || null); setBulkResult(null); }}
+                />
+              </div>
+
+              {bulkFile && (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Selected: <strong>{bulkFile.name}</strong> ({(bulkFile.size / 1024).toFixed(1)} KB)
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+                disabled={bulkUploading || !bulkFile}
+              >
+                {bulkUploading ? 'Uploading...' : 'Upload & Process'}
+              </button>
+            </form>
+
+            {bulkResult && (
+              <div style={{ marginTop: '1rem', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.85rem' }}>
+                    <Check size={14} style={{ color: 'var(--success)', verticalAlign: 'middle' }} /> {bulkResult.successful.length} succeeded
+                  </span>
+                  <span style={{ fontSize: '0.85rem' }}>
+                    <X size={14} style={{ color: 'var(--danger)', verticalAlign: 'middle' }} /> {bulkResult.failed.length} failed
+                  </span>
+                </div>
+                {bulkResult.failed.length > 0 && (
+                  <div style={{ maxHeight: '120px', overflowY: 'auto', fontSize: '0.78rem' }}>
+                    {bulkResult.failed.map((f, i) => (
+                      <div key={i} style={{ color: 'var(--danger)', marginBottom: '0.25rem' }}>
+                        Row {f.row}: {f.error}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                const csv = "recipient_id,source_amount\n1,100.00\n2,250.00\n";
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'bulk_transfer_template.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.82rem', color: 'var(--primary)' }}
+            >
+              Download CSV Template
+            </a>
           </div>
         ) : (
           <form onSubmit={handleSendMoney}>
@@ -676,18 +771,10 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           {t.status === 'PENDING' ? (
-                            <button
-                              className="btn btn-success btn-sm"
-                              style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
-                              onClick={() => handleFundTransaction(t.id, totalCost)}
-                              disabled={fundingTxnId === t.id}
-                            >
-                              {fundingTxnId === t.id ? (
-                                <RefreshCw size={12} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-                              ) : (
-                                'Pay / Fund'
-                              )}
-                            </button>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Processing</span>
+                            </div>
                           ) : isRiskRow ? (
                             <button
                               type="button"

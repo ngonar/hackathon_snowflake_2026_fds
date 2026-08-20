@@ -127,3 +127,17 @@ class WalletDeposit(BaseModel):
 
 class WalletResponse(BaseModel):
     wallet_balance: float
+
+# ==========================
+# Bulk Transfer Schemas
+# ==========================
+class BulkTransferRowError(BaseModel):
+    row: int
+    recipient_id: Optional[int] = None
+    source_amount: Optional[float] = None
+    error: str
+
+class BulkTransferResult(BaseModel):
+    total: int
+    successful: List[TransactionResponse]
+    failed: List[BulkTransferRowError]
