@@ -1,31 +1,16 @@
 import logging
 import httpx
-import snowflake.connector
-
-from app.config import settings
+from app.database import get_snowflake_connection
 
 logger = logging.getLogger("uvicorn.error")
 
 FDS_AGENT_URL = "http://fds-agent-service.gxpx.svc.spcs.internal:8080/fds/invoke"
 
 
-def _get_snowflake_connection():
-    conn_params = {
-        "account": settings.SNOWFLAKE_ACCOUNT,
-        "user": settings.SNOWFLAKE_USER,
-        "warehouse": settings.SNOWFLAKE_WAREHOUSE,
-        "database": settings.SNOWFLAKE_DATABASE,
-        "schema": settings.SNOWFLAKE_SCHEMA,
-    }
-    if settings.SNOWFLAKE_PASSWORD:
-        conn_params["password"] = settings.SNOWFLAKE_PASSWORD
-    return snowflake.connector.connect(**conn_params)
-
-
 def _insert_pending_transaction(transaction_data: dict):
     """Insert transaction into PENDING_TRANSACTIONS for audit trail and fallback processing."""
     try:
-        conn = _get_snowflake_connection()
+        conn = get_snowflake_connection()
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.PENDING_TRANSACTIONS 
@@ -61,7 +46,6 @@ def publish_transaction_message(transaction_data: dict):
     Sends transaction to the FDS Agent for fraud analysis via internal SPCS network,
     and inserts into PENDING_TRANSACTIONS for audit trail.
     """
-    # Always insert into Snowflake PENDING_TRANSACTIONS for audit/fallback
     _insert_pending_transaction(transaction_data)
 
     try:

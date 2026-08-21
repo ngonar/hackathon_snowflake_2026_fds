@@ -243,70 +243,7 @@ export default function AdminPanel({ showToast }) {
       {activeTab === 'controls' && (
     <div className="dashboard-grid">
       
-      {/* 1. KYC Approvals Queue */}
-      <div className="glass card grid-span-full">
-        <div className="card-header">
-          <div className="card-title-icon">
-            <Users className="text-warning" style={{ color: 'var(--warning)' }} />
-            <h3>KYC Approval Queue</h3>
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={fetchPendingKyc} disabled={loadingKyc}>
-            <RefreshCw size={14} className={loadingKyc ? 'animate-spin' : ''} style={loadingKyc ? { animation: 'spin 1s linear infinite' } : {}} />
-            Refresh
-          </button>
-        </div>
-
-        {pendingKycUsers.length === 0 ? (
-          <div className="empty-state">
-            <ShieldCheck size={36} className="text-success" style={{ color: 'var(--success)', opacity: 0.6 }} />
-            <span>No pending KYC applications. All users are current.</span>
-          </div>
-        ) : (
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>User ID</th>
-                  <th>Full Name</th>
-                  <th>Email Address</th>
-                  <th>Document Type</th>
-                  <th>Document Number</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingKycUsers.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.id}</td>
-                    <td style={{ fontWeight: 600 }}>{u.full_name}</td>
-                    <td>{u.email}</td>
-                    <td style={{ textTransform: 'uppercase' }}>{u.kyc_document_type}</td>
-                    <td style={{ fontFamily: 'monospace' }}>{u.kyc_document_number}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button
-                          className="btn btn-success btn-sm"
-                          style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
-                          onClick={() => handleApproveKyc(u.id, true)}
-                        >
-                          <CheckCircle2 size={14} /> Approve
-                        </button>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
-                          onClick={() => handleApproveKyc(u.id, false)}
-                        >
-                          <XCircle size={14} /> Reject
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* KYC Approval Queue - hidden */}
 
       {/* Wallet Freeze / Unfreeze */}
       <div className="glass card grid-span-full">

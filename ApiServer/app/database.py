@@ -1,21 +1,40 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-
+import os
+import snowflake.connector
 from app.config import settings
 
-# For SQLite, check_same_thread=False is required to allow multiple threads to access it
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
+SPCS_TOKEN_PATH = "/snowflake/session/token"
 
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+def get_snowflake_connection():
+    """Create a Snowflake connection using SPCS OAuth token or fallback credentials."""
+    if os.path.exists(SPCS_TOKEN_PATH):
+        with open(SPCS_TOKEN_PATH, "r") as f:
+            token = f.read().strip()
+        return snowflake.connector.connect(
+            host=os.getenv("SNOWFLAKE_HOST", ""),
+            account=settings.SNOWFLAKE_ACCOUNT,
+            authenticator="oauth",
+            token=token,
+            warehouse=settings.SNOWFLAKE_WAREHOUSE,
+            database=settings.SNOWFLAKE_DATABASE,
+            schema=settings.SNOWFLAKE_SCHEMA,
+        )
+    conn_params = {
+        "account": settings.SNOWFLAKE_ACCOUNT,
+        "user": settings.SNOWFLAKE_USER,
+        "warehouse": settings.SNOWFLAKE_WAREHOUSE,
+        "database": settings.SNOWFLAKE_DATABASE,
+        "schema": settings.SNOWFLAKE_SCHEMA,
+    }
+    if settings.SNOWFLAKE_PASSWORD:
+        conn_params["password"] = settings.SNOWFLAKE_PASSWORD
+    return snowflake.connector.connect(**conn_params)
+
 
 def get_db():
-    db = SessionLocal()
+    """Yields a Snowflake connection for use as a FastAPI dependency."""
+    conn = get_snowflake_connection()
     try:
-        yield db
+        yield conn
     finally:
-        db.close()
+        conn.close()

@@ -2,10 +2,11 @@ import os
 import json
 import base64
 import snowflake.connector
-from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
 load_dotenv()
+
+SPCS_TOKEN_PATH = "/snowflake/session/token"
 
 FDS_SCHEMA_CONTEXT = """
 You have access to the following Snowflake tables in SNOWFLAKE_LEARNING_DB.FDS:
@@ -60,22 +61,33 @@ RULES:
 """
 
 
-def _load_private_key():
+def _get_snowflake_connection():
+    if os.path.exists(SPCS_TOKEN_PATH):
+        with open(SPCS_TOKEN_PATH, "r") as f:
+            token = f.read().strip()
+        return snowflake.connector.connect(
+            host=os.getenv("SNOWFLAKE_HOST", ""),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            authenticator="oauth",
+            token=token,
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+            database="SNOWFLAKE_LEARNING_DB",
+            schema="FDS",
+        )
+    # Fallback: key-pair auth for local development
+    from cryptography.hazmat.primitives import serialization
     key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
     key_bytes = base64.b64decode(key_b64)
     private_key = serialization.load_pem_private_key(key_bytes, password=None)
-    return private_key.private_bytes(
+    pkb = private_key.private_bytes(
         encoding=serialization.Encoding.DER,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-
-
-def _get_snowflake_connection():
     return snowflake.connector.connect(
         account=os.getenv("SNOWFLAKE_ACCOUNT"),
         user=os.getenv("SNOWFLAKE_USER"),
-        private_key=_load_private_key(),
+        private_key=pkb,
         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
         database="SNOWFLAKE_LEARNING_DB",
         schema="FDS",

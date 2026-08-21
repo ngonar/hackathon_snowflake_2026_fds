@@ -1,223 +1,269 @@
 import random
 import string
-from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
+import snowflake.connector
 
-from app import models, schemas
 from app.auth import get_password_hash
+
+
+def _row_to_dict(cursor, row) -> dict:
+    columns = [desc[0].lower() for desc in cursor.description]
+    return dict(zip(columns, row))
+
+
+def _fetchone_dict(cursor) -> Optional[dict]:
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_dict(cursor, row)
+
+
+def _fetchall_dict(cursor) -> List[dict]:
+    rows = cursor.fetchall()
+    return [_row_to_dict(cursor, row) for row in rows]
+
 
 # ==========================
 # User CRUD
 # ==========================
-def get_user(db: Session, user_id: int) -> Optional[models.User]:
-    return db.query(models.User).filter(models.User.id == user_id).first()
+def get_user(conn, user_id: int) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM USERS WHERE ID = %s", (user_id,))
+    return _fetchone_dict(cursor)
 
-def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
-    return db.query(models.User).filter(models.User.email == email).first()
 
-def create_user(db: Session, user: schemas.UserCreate, role: str = "user") -> models.User:
-    hashed_pw = get_password_hash(user.password)
-    db_user = models.User(
-        email=user.email,
-        full_name=user.full_name,
-        hashed_password=hashed_pw,
-        role=role,
-        wallet_balance=0.0
+def get_user_by_email(conn, email: str) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM USERS WHERE EMAIL = %s", (email,))
+    return _fetchone_dict(cursor)
+
+
+def create_user(conn, email: str, full_name: str, password: str, role: str = "user") -> dict:
+    hashed_pw = get_password_hash(password)
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO USERS (ID, EMAIL, FULL_NAME, HASHED_PASSWORD, ROLE, KYC_STATUS, WALLET_BALANCE, WALLET_FROZEN, CREATED_AT, UPDATED_AT)
+        VALUES (SNOWFLAKE_LEARNING_DB.FDS.USERS_SEQ.NEXTVAL, %s, %s, %s, %s, 'PENDING_SUBMISSION', 0.0, 'ACTIVE', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())""",
+        (email, full_name, hashed_pw, role),
     )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+    cursor.execute("SELECT * FROM USERS WHERE EMAIL = %s", (email,))
+    return _fetchone_dict(cursor)
 
-def update_user_kyc(db: Session, user_id: int, doc_type: str, doc_number: str) -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.kyc_document_type = doc_type
-        db_user.kyc_document_number = doc_number
-        db_user.kyc_status = "PENDING_APPROVAL"
-        db.commit()
-        db.refresh(db_user)
-    return db_user
 
-def approve_user_kyc(db: Session, user_id: int, approve: bool) -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.kyc_status = "APPROVED" if approve else "REJECTED"
-        db.commit()
-        db.refresh(db_user)
-    return db_user
+def update_user_kyc(conn, user_id: int, doc_type: str, doc_number: str) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """UPDATE USERS SET KYC_DOCUMENT_TYPE = %s, KYC_DOCUMENT_NUMBER = %s, 
+        KYC_STATUS = 'PENDING_APPROVAL', UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s""",
+        (doc_type, doc_number, user_id),
+    )
+    return get_user(conn, user_id)
 
-def update_user_balance(db: Session, user_id: int, amount: float) -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.wallet_balance += amount
-        db.commit()
-        db.refresh(db_user)
-    return db_user
 
-def get_pending_kyc_users(db: Session) -> List[models.User]:
-    return db.query(models.User).filter(models.User.kyc_status == "PENDING_APPROVAL").all()
+def approve_user_kyc(conn, user_id: int, approve: bool) -> Optional[dict]:
+    status = "APPROVED" if approve else "REJECTED"
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE USERS SET KYC_STATUS = %s, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
+        (status, user_id),
+    )
+    return get_user(conn, user_id)
 
-def get_all_users(db: Session) -> List[models.User]:
-    return db.query(models.User).all()
 
-def freeze_user_wallet(db: Session, user_id: int, reason: str = "Fraud risk detected") -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.wallet_frozen = "FROZEN"
-        db_user.kyc_status = "FROZEN"
-        db.commit()
-        db.refresh(db_user)
-    return db_user
+def update_user_balance(conn, user_id: int, amount: float) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE USERS SET WALLET_BALANCE = WALLET_BALANCE + %s, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
+        (amount, user_id),
+    )
+    return get_user(conn, user_id)
 
-def unfreeze_user_wallet(db: Session, user_id: int) -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.wallet_frozen = "ACTIVE"
-        if db_user.kyc_status == "FROZEN":
-            db_user.kyc_status = "PENDING_SUBMISSION"
-        db.commit()
-        db.refresh(db_user)
-    return db_user
 
-def reset_user_kyc(db: Session, user_id: int) -> Optional[models.User]:
-    db_user = get_user(db, user_id)
-    if db_user:
-        db_user.kyc_status = "PENDING_SUBMISSION"
-        db_user.kyc_document_type = None
-        db_user.kyc_document_number = None
-        db.commit()
-        db.refresh(db_user)
-    return db_user
+def get_pending_kyc_users(conn) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM USERS WHERE KYC_STATUS = 'PENDING_APPROVAL'")
+    return _fetchall_dict(cursor)
+
+
+def get_all_users(conn) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM USERS ORDER BY ID")
+    return _fetchall_dict(cursor)
+
+
+def freeze_user_wallet(conn, user_id: int, reason: str = "Fraud risk detected") -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE USERS SET WALLET_FROZEN = 'FROZEN', KYC_STATUS = 'FROZEN', UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
+        (user_id,),
+    )
+    return get_user(conn, user_id)
+
+
+def unfreeze_user_wallet(conn, user_id: int) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """UPDATE USERS SET WALLET_FROZEN = 'ACTIVE', 
+        KYC_STATUS = CASE WHEN KYC_STATUS = 'FROZEN' THEN 'PENDING_SUBMISSION' ELSE KYC_STATUS END,
+        UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s""",
+        (user_id,),
+    )
+    return get_user(conn, user_id)
+
+
+def reset_user_kyc(conn, user_id: int) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """UPDATE USERS SET KYC_STATUS = 'PENDING_SUBMISSION', KYC_DOCUMENT_TYPE = NULL, 
+        KYC_DOCUMENT_NUMBER = NULL, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s""",
+        (user_id,),
+    )
+    return get_user(conn, user_id)
+
 
 # ==========================
 # Recipient CRUD
 # ==========================
-def create_recipient(db: Session, sender_id: int, recipient: schemas.RecipientCreate) -> models.Recipient:
-    db_recipient = models.Recipient(
-        sender_id=sender_id,
-        name=recipient.name,
-        bank_name=recipient.bank_name,
-        account_number=recipient.account_number,
-        routing_number=recipient.routing_number,
-        country=recipient.country,
-        currency=recipient.currency
+def create_recipient(conn, sender_id: int, name: str, bank_name: str, account_number: str,
+                     routing_number: Optional[str], country: str, currency: str) -> dict:
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO RECIPIENTS (ID, SENDER_ID, NAME, BANK_NAME, ACCOUNT_NUMBER, ROUTING_NUMBER, COUNTRY, CURRENCY, CREATED_AT)
+        VALUES (SNOWFLAKE_LEARNING_DB.FDS.RECIPIENTS_SEQ.NEXTVAL, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP())""",
+        (sender_id, name, bank_name, account_number, routing_number, country, currency.upper()),
     )
-    db.add(db_recipient)
-    db.commit()
-    db.refresh(db_recipient)
-    return db_recipient
+    cursor.execute(
+        "SELECT * FROM RECIPIENTS WHERE SENDER_ID = %s AND ACCOUNT_NUMBER = %s ORDER BY ID DESC LIMIT 1",
+        (sender_id, account_number),
+    )
+    return _fetchone_dict(cursor)
 
-def get_recipients_by_sender(db: Session, sender_id: int) -> List[models.Recipient]:
-    return db.query(models.Recipient).filter(models.Recipient.sender_id == sender_id).all()
 
-def get_recipient(db: Session, recipient_id: int) -> Optional[models.Recipient]:
-    return db.query(models.Recipient).filter(models.Recipient.id == recipient_id).first()
+def get_recipients_by_sender(conn, sender_id: int) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM RECIPIENTS WHERE SENDER_ID = %s ORDER BY ID", (sender_id,))
+    return _fetchall_dict(cursor)
+
+
+def get_recipient(conn, recipient_id: int) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM RECIPIENTS WHERE ID = %s", (recipient_id,))
+    return _fetchone_dict(cursor)
+
 
 # ==========================
 # Exchange Rate CRUD
 # ==========================
-def get_exchange_rate(db: Session, source: str, target: str) -> Optional[models.ExchangeRate]:
-    return db.query(models.ExchangeRate).filter(
-        models.ExchangeRate.source_currency == source.upper(),
-        models.ExchangeRate.target_currency == target.upper()
-    ).first()
+def get_exchange_rate(conn, source: str, target: str) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM EXCHANGE_RATES WHERE SOURCE_CURRENCY = %s AND TARGET_CURRENCY = %s",
+        (source.upper(), target.upper()),
+    )
+    return _fetchone_dict(cursor)
 
-def get_all_exchange_rates(db: Session) -> List[models.ExchangeRate]:
-    return db.query(models.ExchangeRate).all()
 
-def create_or_update_exchange_rate(db: Session, source: str, target: str, rate: float, fee_percentage: float) -> models.ExchangeRate:
-    db_rate = get_exchange_rate(db, source, target)
-    if db_rate:
-        db_rate.rate = rate
-        db_rate.fee_percentage = fee_percentage
-    else:
-        db_rate = models.ExchangeRate(
-            source_currency=source.upper(),
-            target_currency=target.upper(),
-            rate=rate,
-            fee_percentage=fee_percentage
+def get_all_exchange_rates(conn) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM EXCHANGE_RATES ORDER BY SOURCE_CURRENCY, TARGET_CURRENCY")
+    return _fetchall_dict(cursor)
+
+
+def create_or_update_exchange_rate(conn, source: str, target: str, rate: float, fee_percentage: float) -> dict:
+    cursor = conn.cursor()
+    existing = get_exchange_rate(conn, source, target)
+    if existing:
+        cursor.execute(
+            """UPDATE EXCHANGE_RATES SET RATE = %s, FEE_PERCENTAGE = %s, UPDATED_AT = CURRENT_TIMESTAMP()
+            WHERE SOURCE_CURRENCY = %s AND TARGET_CURRENCY = %s""",
+            (rate, fee_percentage, source.upper(), target.upper()),
         )
-        db.add(db_rate)
-    db.commit()
-    db.refresh(db_rate)
-    return db_rate
+    else:
+        cursor.execute(
+            """INSERT INTO EXCHANGE_RATES (SOURCE_CURRENCY, TARGET_CURRENCY, RATE, FEE_PERCENTAGE, CREATED_AT, UPDATED_AT)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())""",
+            (source.upper(), target.upper(), rate, fee_percentage),
+        )
+    return get_exchange_rate(conn, source, target)
+
 
 # ==========================
 # Transaction CRUD
 # ==========================
 def generate_reference_number() -> str:
-    # Generates a code like REMIT-83749281
     digits = ''.join(random.choices(string.digits, k=8))
     return f"REMIT-{digits}"
 
-def create_transaction(
-    db: Session, 
-    sender_id: int, 
-    recipient_id: int, 
-    source_currency: str, 
-    target_currency: str, 
-    source_amount: float, 
-    target_amount: float, 
-    exchange_rate: float, 
-    fee: float
-) -> models.Transaction:
-    # Ensure reference number is unique
-    while True:
+
+def create_transaction(conn, sender_id: int, recipient_id: int, source_currency: str,
+                       target_currency: str, source_amount: float, target_amount: float,
+                       exchange_rate: float, fee: float) -> dict:
+    ref = generate_reference_number()
+    cursor = conn.cursor()
+    # Ensure unique reference
+    cursor.execute("SELECT 1 FROM TRANSACTIONS WHERE REFERENCE_NUMBER = %s", (ref,))
+    while cursor.fetchone():
         ref = generate_reference_number()
-        exists = db.query(models.Transaction).filter(models.Transaction.reference_number == ref).first()
-        if not exists:
-            break
-            
-    db_txn = models.Transaction(
-        reference_number=ref,
-        sender_id=sender_id,
-        recipient_id=recipient_id,
-        source_currency=source_currency.upper(),
-        target_currency=target_currency.upper(),
-        source_amount=source_amount,
-        target_amount=target_amount,
-        exchange_rate=exchange_rate,
-        fee=fee,
-        status="PENDING"
+        cursor.execute("SELECT 1 FROM TRANSACTIONS WHERE REFERENCE_NUMBER = %s", (ref,))
+
+    cursor.execute(
+        """INSERT INTO TRANSACTIONS (ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID,
+        SOURCE_CURRENCY, TARGET_CURRENCY, SOURCE_AMOUNT, TARGET_AMOUNT,
+        EXCHANGE_RATE, FEE, STATUS, CREATED_AT, UPDATED_AT)
+        VALUES (SNOWFLAKE_LEARNING_DB.FDS.TRANSACTIONS_SEQ.NEXTVAL, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDING', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())""",
+        (ref, sender_id, recipient_id, source_currency.upper(), target_currency.upper(),
+         source_amount, target_amount, exchange_rate, fee),
     )
-    db.add(db_txn)
-    db.commit()
-    db.refresh(db_txn)
-    return db_txn
+    cursor.execute("SELECT * FROM TRANSACTIONS WHERE REFERENCE_NUMBER = %s", (ref,))
+    return _fetchone_dict(cursor)
 
-def get_transaction(db: Session, txn_id: int) -> Optional[models.Transaction]:
-    return db.query(models.Transaction).filter(models.Transaction.id == txn_id).first()
 
-def get_transaction_by_ref(db: Session, ref: str) -> Optional[models.Transaction]:
-    return db.query(models.Transaction).filter(models.Transaction.reference_number == ref).first()
+def get_transaction(conn, txn_id: int) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM TRANSACTIONS WHERE ID = %s", (txn_id,))
+    return _fetchone_dict(cursor)
 
-def get_transactions_by_sender(db: Session, sender_id: int) -> List[models.Transaction]:
-    return db.query(models.Transaction).filter(models.Transaction.sender_id == sender_id).all()
 
-def get_all_transactions(db: Session) -> List[models.Transaction]:
-    return db.query(models.Transaction).all()
+def get_transaction_by_ref(conn, ref: str) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM TRANSACTIONS WHERE REFERENCE_NUMBER = %s", (ref,))
+    return _fetchone_dict(cursor)
 
-def update_transaction_status(
-    db: Session, 
-    txn_id: int, 
-    new_status: str,
-    anomaly_score: Optional[float] = None,
-    velocity_flags: Optional[str] = None,
-    fraud_explanation: Optional[str] = None,
-    fraud_evidence: Optional[str] = None
-) -> Optional[models.Transaction]:
-    db_txn = get_transaction(db, txn_id)
-    if db_txn:
-        db_txn.status = new_status
-        if anomaly_score is not None:
-            db_txn.anomaly_score = anomaly_score
-        if velocity_flags is not None:
-            db_txn.velocity_flags = velocity_flags
-        if fraud_explanation is not None:
-            db_txn.fraud_explanation = fraud_explanation
-        if fraud_evidence is not None:
-            db_txn.fraud_evidence = fraud_evidence
-        db.commit()
-        db.refresh(db_txn)
-    return db_txn
+
+def get_transactions_by_sender(conn, sender_id: int) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM TRANSACTIONS WHERE SENDER_ID = %s ORDER BY CREATED_AT DESC", (sender_id,))
+    return _fetchall_dict(cursor)
+
+
+def get_all_transactions(conn) -> List[dict]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM TRANSACTIONS ORDER BY CREATED_AT DESC")
+    return _fetchall_dict(cursor)
+
+
+def update_transaction_status(conn, txn_id: int, new_status: str,
+                              anomaly_score: Optional[float] = None,
+                              velocity_flags: Optional[str] = None,
+                              fraud_explanation: Optional[str] = None,
+                              fraud_evidence: Optional[str] = None) -> Optional[dict]:
+    cursor = conn.cursor()
+    sets = ["STATUS = %s", "UPDATED_AT = CURRENT_TIMESTAMP()"]
+    params = [new_status]
+
+    if anomaly_score is not None:
+        sets.append("ANOMALY_SCORE = %s")
+        params.append(anomaly_score)
+    if velocity_flags is not None:
+        sets.append("VELOCITY_FLAGS = %s")
+        params.append(velocity_flags)
+    if fraud_explanation is not None:
+        sets.append("FRAUD_EXPLANATION = %s")
+        params.append(fraud_explanation)
+    if fraud_evidence is not None:
+        sets.append("FRAUD_EVIDENCE = %s")
+        params.append(fraud_evidence)
+
+    params.append(txn_id)
+    cursor.execute(f"UPDATE TRANSACTIONS SET {', '.join(sets)} WHERE ID = %s", params)
+    return get_transaction(conn, txn_id)

@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 
-from app import crud, schemas, auth, models
+from app import crud, schemas, auth
 from app.database import get_db
 from app.nl_query import translate_and_execute
 
@@ -13,40 +12,33 @@ router = APIRouter(
     dependencies=[Depends(auth.get_current_admin)]
 )
 
+
 @router.get("/kyc", response_model=List[schemas.UserResponse])
-def get_pending_kyc(db: Session = Depends(get_db)):
-    return crud.get_pending_kyc_users(db)
+def get_pending_kyc(conn=Depends(get_db)):
+    return crud.get_pending_kyc_users(conn)
 
 
 @router.get("/users", response_model=List[schemas.UserResponse])
-def list_all_users(db: Session = Depends(get_db)):
-    """[Admin] List all users with their wallet and KYC status."""
-    return crud.get_all_users(db)
+def list_all_users(conn=Depends(get_db)):
+    return crud.get_all_users(conn)
 
 
 @router.post("/kyc/{user_id}/approve", response_model=schemas.UserResponse)
-def approve_kyc(
-    user_id: int,
-    approve: bool,
-    db: Session = Depends(get_db)
-):
-    user = crud.get_user(db, user_id)
+def approve_kyc(user_id: int, approve: bool, conn=Depends(get_db)):
+    user = crud.get_user(conn, user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    if user.kyc_status != "PENDING_APPROVAL":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.get("kyc_status") != "PENDING_APPROVAL":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"KYC status is '{user.kyc_status}'. Can only approve/reject users with 'PENDING_APPROVAL' status."
+            detail=f"KYC status is '{user.get('kyc_status')}'. Can only approve/reject users with 'PENDING_APPROVAL' status."
         )
-    return crud.approve_user_kyc(db=db, user_id=user_id, approve=approve)
+    return crud.approve_user_kyc(conn, user_id=user_id, approve=approve)
 
 
 @router.get("/transactions", response_model=List[schemas.TransactionResponse])
-def list_all_transactions(db: Session = Depends(get_db)):
-    return crud.get_all_transactions(db)
+def list_all_transactions(conn=Depends(get_db)):
+    return crud.get_all_transactions(conn)
 
 
 @router.post("/transactions/{txn_id}/status", response_model=schemas.TransactionResponse)
@@ -57,119 +49,84 @@ def update_transaction_status(
     velocity_flags: Optional[str] = None,
     fraud_explanation: Optional[str] = None,
     fraud_evidence: Optional[str] = None,
-    db: Session = Depends(get_db)
+    conn=Depends(get_db)
 ):
-    txn = crud.get_transaction(db, txn_id)
+    txn = crud.get_transaction(conn, txn_id)
     if not txn:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found"
-        )
-        
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+
     allowed_statuses = ["PENDING", "FUNDED", "PROCESSING", "COMPLETED", "CANCELLED", "FAILED", "SUSPICIOUS"]
     if status_value.upper() not in allowed_statuses:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid status. Allowed statuses: {', '.join(allowed_statuses)}"
         )
-        
+
     return crud.update_transaction_status(
-        db=db, 
-        txn_id=txn_id, 
-        new_status=status_value.upper(),
-        anomaly_score=anomaly_score,
-        velocity_flags=velocity_flags,
-        fraud_explanation=fraud_explanation,
-        fraud_evidence=fraud_evidence
+        conn, txn_id=txn_id, new_status=status_value.upper(),
+        anomaly_score=anomaly_score, velocity_flags=velocity_flags,
+        fraud_explanation=fraud_explanation, fraud_evidence=fraud_evidence
     )
 
 
 @router.post("/rates", response_model=schemas.ExchangeRateResponse)
-def create_or_update_rate(
-    rate_data: schemas.ExchangeRateBase,
-    db: Session = Depends(get_db)
-):
+def create_or_update_rate(rate_data: schemas.ExchangeRateBase, conn=Depends(get_db)):
     if rate_data.rate <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Exchange rate must be greater than zero"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Exchange rate must be greater than zero")
     if not (0 <= rate_data.fee_percentage <= 1):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Fee percentage must be between 0.0 and 1.0"
-        )
-        
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fee percentage must be between 0.0 and 1.0")
+
     return crud.create_or_update_exchange_rate(
-        db=db,
-        source=rate_data.source_currency,
-        target=rate_data.target_currency,
-        rate=rate_data.rate,
-        fee_percentage=rate_data.fee_percentage
+        conn, source=rate_data.source_currency, target=rate_data.target_currency,
+        rate=rate_data.rate, fee_percentage=rate_data.fee_percentage
     )
 
 
 @router.post("/users/{user_id}/freeze", response_model=schemas.UserResponse)
-def freeze_user_wallet(
-    user_id: int,
-    reason: str = "Fraud risk detected by FDS",
-    db: Session = Depends(get_db)
-):
-    """[Admin] Freeze a user's wallet due to fraud risk. Sets wallet_frozen=FROZEN and kyc_status=FROZEN."""
-    user = crud.get_user(db, user_id)
+def freeze_user_wallet(user_id: int, reason: str = "Fraud risk detected by FDS", conn=Depends(get_db)):
+    user = crud.get_user(conn, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.wallet_frozen == "FROZEN":
+    if user.get("wallet_frozen") == "FROZEN":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wallet is already frozen")
-    return crud.freeze_user_wallet(db=db, user_id=user_id, reason=reason)
+    return crud.freeze_user_wallet(conn, user_id=user_id, reason=reason)
 
 
 @router.post("/users/{user_id}/unfreeze", response_model=schemas.UserResponse)
-def unfreeze_user_wallet(
-    user_id: int,
-    db: Session = Depends(get_db)
-):
-    """[Admin] Unfreeze a user's wallet. Restores wallet_frozen=ACTIVE."""
-    user = crud.get_user(db, user_id)
+def unfreeze_user_wallet(user_id: int, conn=Depends(get_db)):
+    user = crud.get_user(conn, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.wallet_frozen != "FROZEN":
+    if user.get("wallet_frozen") != "FROZEN":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wallet is not frozen")
-    return crud.unfreeze_user_wallet(db=db, user_id=user_id)
+    return crud.unfreeze_user_wallet(conn, user_id=user_id)
 
 
 @router.post("/users/{user_id}/kyc-reverify", response_model=schemas.UserResponse)
-def dispatch_kyc_reverification(
-    user_id: int,
-    db: Session = Depends(get_db)
-):
-    """[Admin] Reset user KYC to force re-verification. Clears KYC documents and sets status to PENDING_SUBMISSION."""
-    user = crud.get_user(db, user_id)
+def dispatch_kyc_reverification(user_id: int, conn=Depends(get_db)):
+    user = crud.get_user(conn, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return crud.reset_user_kyc(db=db, user_id=user_id)
+    return crud.reset_user_kyc(conn, user_id=user_id)
 
 
 @router.post("/users/{user_id}/kyc-status", response_model=schemas.UserResponse)
-def update_kyc_status(
-    user_id: int,
-    status_value: str,
-    db: Session = Depends(get_db)
-):
-    """[Admin] Directly update a user's KYC status."""
+def update_kyc_status(user_id: int, status_value: str, conn=Depends(get_db)):
     allowed = ["PENDING_SUBMISSION", "PENDING_APPROVAL", "APPROVED", "REJECTED", "FROZEN"]
     if status_value.upper() not in allowed:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid KYC status. Allowed: {', '.join(allowed)}"
         )
-    user = crud.get_user(db, user_id)
+    user = crud.get_user(conn, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    user.kyc_status = status_value.upper()
-    db.commit()
-    db.refresh(user)
-    return user
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE USERS SET KYC_STATUS = %s, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
+        (status_value.upper(), user_id)
+    )
+    return crud.get_user(conn, user_id)
 
 
 class InvestigateRequest(BaseModel):
@@ -178,11 +135,6 @@ class InvestigateRequest(BaseModel):
 
 @router.post("/investigate")
 def investigate_fraud(req: InvestigateRequest):
-    """
-    [Admin] Natural language fraud investigation query.
-    Translates natural language to SQL via Cortex AI_COMPLETE, executes against FDS tables,
-    and returns structured results with the generated SQL.
-    """
     if not req.query or len(req.query.strip()) < 3:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

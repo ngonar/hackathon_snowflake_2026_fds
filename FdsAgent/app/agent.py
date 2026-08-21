@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import base64
+import datetime
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableLambda
@@ -123,13 +124,19 @@ HUMAN_TEMPLATE = """Analyze the following enriched transaction data:
 {recipient_history}
 """
 
+def _json_serial(obj):
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
 def build_prompt(enriched_data: dict) -> str:
     """Builds the full prompt string for Cortex Complete from enriched data."""
-    current_transaction = json.dumps(enriched_data.get("transaction", {}), indent=2)
-    sender_profile = json.dumps(enriched_data.get("sender", {}), indent=2)
-    recipient_profile = json.dumps(enriched_data.get("recipient", {}), indent=2)
-    sender_history = json.dumps(enriched_data.get("sender_history", []), indent=2)
-    recipient_history = json.dumps(enriched_data.get("recipient_history", []), indent=2)
+    current_transaction = json.dumps(enriched_data.get("transaction", {}), indent=2, default=_json_serial)
+    sender_profile = json.dumps(enriched_data.get("sender", {}), indent=2, default=_json_serial)
+    recipient_profile = json.dumps(enriched_data.get("recipient", {}), indent=2, default=_json_serial)
+    sender_history = json.dumps(enriched_data.get("sender_history", []), indent=2, default=_json_serial)
+    recipient_history = json.dumps(enriched_data.get("recipient_history", []), indent=2, default=_json_serial)
 
     human_message = HUMAN_TEMPLATE.format(
         current_transaction=current_transaction,
@@ -157,7 +164,7 @@ async def call_cortex_complete(prompt: str) -> FraudAnalysisResult:
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?)",
+            "SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, %s)",
             ('llama3.1-70b', prompt)
         )
         row = cursor.fetchone()
@@ -257,7 +264,38 @@ async def analyze_and_process_txn(txn: dict) -> dict:
     
     print(f"FDS Agent: Risk tier: {risk_tier}, Decision: {decision}")
     
-    # 4. Log results to our local SQLite database (fds.db)
+    # 4. Log results to Snowflake FRAUD_ANALYSIS_LOG
+    try:
+        log_conn = _get_snowflake_session()
+        log_cursor = log_conn.cursor()
+        log_cursor.execute(
+            """INSERT INTO SNOWFLAKE_LEARNING_DB.FDS.FRAUD_ANALYSIS_LOG
+            (TXN_ID, REFERENCE_NUMBER, SENDER_ID, RECIPIENT_ID, SOURCE_AMOUNT,
+             IS_FRAUD, FRAUD_TYPE, ANOMALY_SCORE, VELOCITY_FLAGS, EVIDENCE,
+             EXPLANATION, DECISION, ANALYZED_AT)
+            SELECT %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s), %s, %s, CURRENT_TIMESTAMP()""",
+            (
+                txn.get("id"),
+                txn.get("reference_number"),
+                txn.get("sender_id"),
+                txn.get("recipient_id"),
+                txn.get("source_amount"),
+                analysis.is_fraud,
+                analysis.fraud_type,
+                analysis.anomaly_score,
+                json.dumps(analysis.velocity_flags),
+                json.dumps(analysis.evidence),
+                analysis.explanation,
+                decision,
+            )
+        )
+        log_cursor.close()
+        log_conn.close()
+        print(f"FDS Agent: Logged analysis to FRAUD_ANALYSIS_LOG for txn {txn.get('reference_number')}")
+    except Exception as e:
+        print(f"FDS Agent: Warning: Failed to log to FRAUD_ANALYSIS_LOG: {e}")
+
+    # Also save to local SQLite as backup
     save_analysis(
         txn_id=txn.get("id"),
         reference_number=txn.get("reference_number"),

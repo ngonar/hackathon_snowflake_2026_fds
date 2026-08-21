@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from typing import List
 
-from app import crud, schemas, auth, models
+from app import crud, schemas, auth
 from app.database import get_db
 
 router = APIRouter(
@@ -10,20 +9,28 @@ router = APIRouter(
     tags=["Recipients"]
 )
 
+
 @router.post("", response_model=schemas.RecipientResponse, status_code=status.HTTP_201_CREATED)
 def create_recipient(
     recipient: schemas.RecipientCreate,
-    current_user: models.User = Depends(auth.get_current_user),
-    db: Session = Depends(get_db)
+    current_user: dict = Depends(auth.get_current_user),
+    conn=Depends(get_db)
 ):
-    # Standard check: sender cannot add a recipient to a country with unsupported exchange rates if we want,
-    # but let's allow it generally or just assume standard currencies.
-    return crud.create_recipient(db=db, sender_id=current_user.id, recipient=recipient)
+    return crud.create_recipient(
+        conn,
+        sender_id=current_user["id"],
+        name=recipient.name,
+        bank_name=recipient.bank_name,
+        account_number=recipient.account_number,
+        routing_number=recipient.routing_number,
+        country=recipient.country,
+        currency=recipient.currency,
+    )
 
 
 @router.get("", response_model=List[schemas.RecipientResponse])
 def list_recipients(
-    current_user: models.User = Depends(auth.get_current_user),
-    db: Session = Depends(get_db)
+    current_user: dict = Depends(auth.get_current_user),
+    conn=Depends(get_db)
 ):
-    return crud.get_recipients_by_sender(db=db, sender_id=current_user.id)
+    return crud.get_recipients_by_sender(conn, sender_id=current_user["id"])

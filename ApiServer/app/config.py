@@ -13,12 +13,13 @@ class Settings(BaseSettings):
 
     # Snowflake configuration
     SNOWFLAKE_ACCOUNT: str = os.getenv("SNOWFLAKE_ACCOUNT", "")
+    SNOWFLAKE_HOST: str = os.getenv("SNOWFLAKE_HOST", "")
     SNOWFLAKE_USER: str = os.getenv("SNOWFLAKE_USER", "")
     SNOWFLAKE_PASSWORD: str = os.getenv("SNOWFLAKE_PASSWORD", "")
     SNOWFLAKE_PRIVATE_KEY: str = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
     SNOWFLAKE_WAREHOUSE: str = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
-    SNOWFLAKE_DATABASE: str = os.getenv("SNOWFLAKE_DATABASE", "NGONAROID_FDS")
-    SNOWFLAKE_SCHEMA: str = os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC")
+    SNOWFLAKE_DATABASE: str = os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB")
+    SNOWFLAKE_SCHEMA: str = os.getenv("SNOWFLAKE_SCHEMA", "FDS")
 
     class Config:
         env_file = ".env"
