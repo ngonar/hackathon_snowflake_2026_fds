@@ -35,6 +35,21 @@ def _load_private_key():
 
 def _get_snowflake_session():
     """Create a Snowflake connection for Cortex Complete calls."""
+    # Inside SPCS, use the OAuth token file
+    token_path = "/snowflake/session/token"
+    if os.path.exists(token_path):
+        with open(token_path, "r") as f:
+            token = f.read().strip()
+        return snowflake.connector.connect(
+            host=os.getenv("SNOWFLAKE_HOST"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            authenticator="oauth",
+            token=token,
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            database=os.getenv("SNOWFLAKE_DATABASE"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA"),
+        )
+    # Fallback for local dev
     conn_params = {
         "account": os.getenv("SNOWFLAKE_ACCOUNT"),
         "user": os.getenv("SNOWFLAKE_USER"),
@@ -141,24 +156,13 @@ async def call_cortex_complete(prompt: str) -> FraudAnalysisResult:
     conn = _get_snowflake_session()
     try:
         cursor = conn.cursor()
-        messages = json.dumps([{"role": "user", "content": prompt}])
-        options = json.dumps({"max_tokens": 4096, "temperature": 0})
-        sql = """
-            SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                'llama3.1-70b',
-                PARSE_JSON(%s),
-                PARSE_JSON(%s)
-            )
-        """
-        cursor.execute(sql, (messages, options))
+        cursor.execute(
+            "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?)",
+            ('llama3.1-70b', prompt)
+        )
         row = cursor.fetchone()
         raw_response = row[0]
-        response_obj = json.loads(raw_response)
-        if "choices" in response_obj:
-            content = response_obj["choices"][0]["messages"]
-        else:
-            content = raw_response
-        parsed = json.loads(content)
+        parsed = json.loads(raw_response)
         return FraudAnalysisResult(**parsed)
     finally:
         conn.close()

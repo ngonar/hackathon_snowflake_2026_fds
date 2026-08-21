@@ -40,6 +40,21 @@ def _load_private_key():
 
 
 def _get_connection():
+    # Inside SPCS, use the OAuth token file for authentication
+    token_path = "/snowflake/session/token"
+    if os.path.exists(token_path):
+        with open(token_path, "r") as f:
+            token = f.read().strip()
+        return snowflake.connector.connect(
+            host=os.getenv("SNOWFLAKE_HOST"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT", SNOWFLAKE_ACCOUNT),
+            authenticator="oauth",
+            token=token,
+            warehouse=SNOWFLAKE_WAREHOUSE,
+            database=SNOWFLAKE_DATABASE,
+            schema=SNOWFLAKE_SCHEMA,
+        )
+    # Fallback: private key or password auth (for local dev)
     conn_params = {
         "account": SNOWFLAKE_ACCOUNT,
         "user": SNOWFLAKE_USER,

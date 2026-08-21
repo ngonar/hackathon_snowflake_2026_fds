@@ -7,22 +7,44 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _load_private_key():
-    key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
-    key_bytes = base64.b64decode(key_b64)
-    private_key = serialization.load_pem_private_key(key_bytes, password=None)
-    return private_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-
-
 def _get_connection():
+    # Inside SPCS, use the OAuth token file
+    token_path = "/snowflake/session/token"
+    if os.path.exists(token_path):
+        with open(token_path, "r") as f:
+            token = f.read().strip()
+        return snowflake.connector.connect(
+            host=os.getenv("SNOWFLAKE_HOST"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            authenticator="oauth",
+            token=token,
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA", "FDS"),
+        )
+    # Fallback for local dev
+    key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
+    if key_b64:
+        key_bytes = base64.b64decode(key_b64)
+        private_key = serialization.load_pem_private_key(key_bytes, password=None)
+        pk_der = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return snowflake.connector.connect(
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            user=os.getenv("SNOWFLAKE_USER"),
+            private_key=pk_der,
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA", "FDS"),
+            role=os.getenv("SNOWFLAKE_ROLE"),
+        )
     return snowflake.connector.connect(
         account=os.getenv("SNOWFLAKE_ACCOUNT"),
         user=os.getenv("SNOWFLAKE_USER"),
-        private_key=_load_private_key(),
+        password=os.getenv("SNOWFLAKE_PASSWORD"),
         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
         database=os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB"),
         schema=os.getenv("SNOWFLAKE_SCHEMA", "FDS"),
