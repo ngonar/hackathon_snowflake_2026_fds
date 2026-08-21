@@ -168,6 +168,8 @@ export const api = {
   // Admin
   getPendingKyc: () => request('/admin/kyc'),
 
+  listAllUsers: () => request('/admin/users'),
+
   approveKyc: (userId, approve) => {
     return request(`/admin/kyc/${userId}/approve?approve=${approve}`, {
       method: 'POST'
@@ -198,6 +200,24 @@ export const api = {
     return request('/admin/investigate', {
       method: 'POST',
       body: { query }
+    });
+  },
+
+  freezeWallet: (userId, reason = 'Manual freeze by admin') => {
+    return request(`/admin/users/${userId}/freeze?reason=${encodeURIComponent(reason)}`, {
+      method: 'POST'
+    });
+  },
+
+  unfreezeWallet: (userId) => {
+    return request(`/admin/users/${userId}/unfreeze`, {
+      method: 'POST'
+    });
+  },
+
+  updateKycStatus: (userId, statusValue) => {
+    return request(`/admin/users/${userId}/kyc-status?status_value=${encodeURIComponent(statusValue)}`, {
+      method: 'POST'
     });
   }
 };

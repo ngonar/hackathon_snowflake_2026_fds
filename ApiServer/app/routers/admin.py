@@ -18,6 +18,12 @@ def get_pending_kyc(db: Session = Depends(get_db)):
     return crud.get_pending_kyc_users(db)
 
 
+@router.get("/users", response_model=List[schemas.UserResponse])
+def list_all_users(db: Session = Depends(get_db)):
+    """[Admin] List all users with their wallet and KYC status."""
+    return crud.get_all_users(db)
+
+
 @router.post("/kyc/{user_id}/approve", response_model=schemas.UserResponse)
 def approve_kyc(
     user_id: int,
@@ -142,6 +148,28 @@ def dispatch_kyc_reverification(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return crud.reset_user_kyc(db=db, user_id=user_id)
+
+
+@router.post("/users/{user_id}/kyc-status", response_model=schemas.UserResponse)
+def update_kyc_status(
+    user_id: int,
+    status_value: str,
+    db: Session = Depends(get_db)
+):
+    """[Admin] Directly update a user's KYC status."""
+    allowed = ["PENDING_SUBMISSION", "PENDING_APPROVAL", "APPROVED", "REJECTED", "FROZEN"]
+    if status_value.upper() not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid KYC status. Allowed: {', '.join(allowed)}"
+        )
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.kyc_status = status_value.upper()
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 class InvestigateRequest(BaseModel):

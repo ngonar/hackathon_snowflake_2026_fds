@@ -58,6 +58,9 @@ def update_user_balance(db: Session, user_id: int, amount: float) -> Optional[mo
 def get_pending_kyc_users(db: Session) -> List[models.User]:
     return db.query(models.User).filter(models.User.kyc_status == "PENDING_APPROVAL").all()
 
+def get_all_users(db: Session) -> List[models.User]:
+    return db.query(models.User).all()
+
 def freeze_user_wallet(db: Session, user_id: int, reason: str = "Fraud risk detected") -> Optional[models.User]:
     db_user = get_user(db, user_id)
     if db_user:

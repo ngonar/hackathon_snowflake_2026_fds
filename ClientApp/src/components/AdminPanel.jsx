@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { 
   Users, ShieldCheck, DollarSign, ListOrdered, CheckCircle2, 
-  XCircle, Edit, RefreshCw, Eye, ArrowRight, HelpCircle, BrainCircuit 
+  XCircle, Edit, RefreshCw, Eye, ArrowRight, HelpCircle, BrainCircuit,
+  Lock, Unlock
 } from 'lucide-react';
 import RiskBreakdownCard from './RiskBreakdownCard';
 import FraudInvestigator from './FraudInvestigator';
@@ -40,12 +41,31 @@ export default function AdminPanel({ showToast }) {
   const [editingRateId, setEditingRateId] = useState(null);
   const [savingRate, setSavingRate] = useState(false);
 
+  // Wallet management state
+  const [allUsers, setAllUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [walletActionUserId, setWalletActionUserId] = useState(null);
+  const [kycActionUserId, setKycActionUserId] = useState(null);
+
   // Fetch all admin data on mount
   useEffect(() => {
     fetchPendingKyc();
     fetchRates();
     fetchAllTransactions();
+    fetchAllUsers();
   }, []);
+
+  const fetchAllUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const data = await api.listAllUsers();
+      setAllUsers(data);
+    } catch (err) {
+      showToast(err.message || 'Failed to fetch users', 'error');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
 
   const fetchPendingKyc = async () => {
     setLoadingKyc(true);
@@ -154,6 +174,45 @@ export default function AdminPanel({ showToast }) {
     }
   };
 
+  const handleFreezeWallet = async (userId) => {
+    setWalletActionUserId(userId);
+    try {
+      await api.freezeWallet(userId);
+      showToast(`Wallet for user #${userId} has been frozen`, 'success');
+      await fetchAllUsers();
+    } catch (err) {
+      showToast(err.message || 'Failed to freeze wallet', 'error');
+    } finally {
+      setWalletActionUserId(null);
+    }
+  };
+
+  const handleUnfreezeWallet = async (userId) => {
+    setWalletActionUserId(userId);
+    try {
+      await api.unfreezeWallet(userId);
+      showToast(`Wallet for user #${userId} has been unfrozen`, 'success');
+      await fetchAllUsers();
+    } catch (err) {
+      showToast(err.message || 'Failed to unfreeze wallet', 'error');
+    } finally {
+      setWalletActionUserId(null);
+    }
+  };
+
+  const handleUpdateKycStatus = async (userId, newStatus) => {
+    setKycActionUserId(userId);
+    try {
+      await api.updateKycStatus(userId, newStatus);
+      showToast(`KYC status for user #${userId} updated to ${newStatus}`, 'success');
+      await fetchAllUsers();
+    } catch (err) {
+      showToast(err.message || 'Failed to update KYC status', 'error');
+    } finally {
+      setKycActionUserId(null);
+    }
+  };
+
   return (
     <div>
       {/* Tab Navigation */}
@@ -239,6 +298,125 @@ export default function AdminPanel({ showToast }) {
                         >
                           <XCircle size={14} /> Reject
                         </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Wallet Freeze / Unfreeze */}
+      <div className="glass card grid-span-full">
+        <div className="card-header">
+          <div className="card-title-icon">
+            <Lock className="text-danger" style={{ color: 'var(--danger)' }} />
+            <h3>Wallet Management</h3>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={fetchAllUsers} disabled={loadingUsers}>
+            <RefreshCw size={14} className={loadingUsers ? 'animate-spin' : ''} style={loadingUsers ? { animation: 'spin 1s linear infinite' } : {}} />
+            Refresh
+          </button>
+        </div>
+
+        {allUsers.length === 0 ? (
+          <div className="empty-state">
+            <Users size={36} style={{ opacity: 0.6 }} />
+            <span>{loadingUsers ? 'Loading users...' : 'No users found.'}</span>
+          </div>
+        ) : (
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Full Name</th>
+                  <th>Email</th>
+                  <th>KYC Status</th>
+                  <th>Wallet Status</th>
+                  <th>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allUsers.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.id}</td>
+                    <td style={{ fontWeight: 600 }}>{u.full_name}</td>
+                    <td>{u.email}</td>
+                    <td>
+                      <span style={{
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        background: u.kyc_status === 'APPROVED' ? 'rgba(16,185,129,0.15)' :
+                                    u.kyc_status === 'FROZEN' ? 'rgba(239,68,68,0.15)' :
+                                    'rgba(245,158,11,0.15)',
+                        color: u.kyc_status === 'APPROVED' ? 'var(--success)' :
+                               u.kyc_status === 'FROZEN' ? 'var(--danger)' :
+                               'var(--warning)'
+                      }}>
+                        {u.kyc_status}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        background: u.wallet_frozen === 'FROZEN' ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                        color: u.wallet_frozen === 'FROZEN' ? 'var(--danger)' : 'var(--success)'
+                      }}>
+                        {u.wallet_frozen === 'FROZEN' ? 'FROZEN' : 'ACTIVE'}
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: 'monospace' }}>${u.wallet_balance?.toFixed(2)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {u.wallet_frozen === 'FROZEN' ? (
+                          <button
+                            className="btn btn-success btn-sm"
+                            style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
+                            onClick={() => handleUnfreezeWallet(u.id)}
+                            disabled={walletActionUserId === u.id}
+                          >
+                            <Unlock size={14} /> Unfreeze
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-danger btn-sm"
+                            style={{ display: 'inline-flex', padding: '0.3rem 0.6rem' }}
+                            onClick={() => handleFreezeWallet(u.id)}
+                            disabled={walletActionUserId === u.id}
+                          >
+                            <Lock size={14} /> Freeze
+                          </button>
+                        )}
+                        <select
+                          style={{
+                            padding: '0.3rem 0.4rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--bg-secondary)',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer'
+                          }}
+                          value={u.kyc_status}
+                          disabled={kycActionUserId === u.id}
+                          onChange={(e) => handleUpdateKycStatus(u.id, e.target.value)}
+                        >
+                          <option value="PENDING_SUBMISSION">PENDING_SUBMISSION</option>
+                          <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
+                          <option value="APPROVED">APPROVED</option>
+                          <option value="REJECTED">REJECTED</option>
+                          <option value="FROZEN">FROZEN</option>
+                        </select>
                       </div>
                     </td>
                   </tr>
