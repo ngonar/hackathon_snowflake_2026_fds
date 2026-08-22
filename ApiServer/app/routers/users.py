@@ -41,6 +41,22 @@ def submit_kyc(
     )
 
 
+@router.put("/me/settings", response_model=schemas.UserResponse)
+def update_user_settings(
+    settings: schemas.BaseCurrencyUpdate,
+    current_user: dict = Depends(auth.get_current_user),
+    conn=Depends(get_db)
+):
+    allowed_currencies = ["USD", "EUR", "GBP", "KES", "INR", "PHP", "MXN"]
+    currency = settings.base_currency.upper()
+    if currency not in allowed_currencies:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported currency. Allowed: {', '.join(allowed_currencies)}"
+        )
+    return crud.update_user_base_currency(conn, user_id=current_user["id"], currency=currency)
+
+
 @router.post("/me/deposit", response_model=schemas.WalletResponse)
 def deposit_funds(
     deposit: schemas.WalletDeposit,

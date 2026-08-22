@@ -92,6 +92,13 @@ export const api = {
   // Users
   getMe: () => request('/users/me'),
 
+  updateBaseCurrency: (baseCurrency) => {
+    return request('/users/me/settings', {
+      method: 'PUT',
+      body: { base_currency: baseCurrency }
+    });
+  },
+
   submitKyc: (documentType, documentNumber) => {
     return request('/users/me/kyc', {
       method: 'POST',

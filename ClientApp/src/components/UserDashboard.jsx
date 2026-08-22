@@ -62,6 +62,14 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
     fetchTransactions();
   }, []);
 
+  // Auto-refresh transaction history every 3 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTransactions();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
   const fetchRecipients = async () => {
     setLoadingRecipients(true);
     try {

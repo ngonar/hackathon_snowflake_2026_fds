@@ -3,8 +3,9 @@ import { api, logout, getToken } from './services/api';
 import LandingView from './components/LandingView';
 import UserDashboard from './components/UserDashboard';
 import AdminPanel from './components/AdminPanel';
+import SettingsPage from './components/SettingsPage';
 import { 
-  Globe, LogOut, LayoutDashboard, Shield, 
+  Globe, LogOut, LayoutDashboard, Shield, Settings,
   CheckCircle, AlertTriangle, XCircle, Info 
 } from 'lucide-react';
 
@@ -127,6 +128,13 @@ export default function App() {
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '0.5rem' }}>
                 Hello, <strong>{user.full_name}</strong> ({user.role})
               </span>
+
+              <button 
+                className={`btn btn-sm ${view === 'settings' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setView('settings')}
+              >
+                <Settings size={14} /> Settings
+              </button>
               
               <button className="btn btn-secondary btn-sm" onClick={handleLogout}>
                 <LogOut size={14} /> Log Out
@@ -160,6 +168,14 @@ export default function App() {
         {view === 'admin' && user && (
           <AdminPanel 
             showToast={showToast} 
+          />
+        )}
+
+        {view === 'settings' && user && (
+          <SettingsPage 
+            user={user}
+            onRefreshUser={fetchUserProfile}
+            showToast={showToast}
           />
         )}
       </main>

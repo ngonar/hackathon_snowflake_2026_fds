@@ -34,7 +34,7 @@ def create_remittance_transaction(
             detail="Recipient not found"
         )
 
-    source_currency = "USD"
+    source_currency = current_user.get("base_currency", "USD").upper()
     target_currency = recipient["currency"].upper()
 
     if source_currency == target_currency:
@@ -45,7 +45,7 @@ def create_remittance_transaction(
         if not rate_record:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Remittance to currency {target_currency} is not currently supported"
+                detail=f"Remittance from {source_currency} to {target_currency} is not currently supported"
             )
         rate = rate_record["rate"]
         fee_percentage = rate_record["fee_percentage"]
@@ -149,7 +149,7 @@ async def bulk_transfer(
 
     successful = []
     failed = []
-    source_currency = "USD"
+    source_currency = current_user.get("base_currency", "USD").upper()
 
     for row_num, row in enumerate(reader, start=1):
         try:

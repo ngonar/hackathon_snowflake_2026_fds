@@ -121,6 +121,15 @@ def reset_user_kyc(conn, user_id: int) -> Optional[dict]:
     return get_user(conn, user_id)
 
 
+def update_user_base_currency(conn, user_id: int, currency: str) -> Optional[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE USERS SET BASE_CURRENCY = %s, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
+        (currency.upper(), user_id),
+    )
+    return get_user(conn, user_id)
+
+
 # ==========================
 # Recipient CRUD
 # ==========================

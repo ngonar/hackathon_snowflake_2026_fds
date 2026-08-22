@@ -20,6 +20,7 @@ class UserResponse(UserBase):
     kyc_document_number: Optional[str] = None
     wallet_balance: float
     wallet_frozen: str = "ACTIVE"
+    base_currency: str = "USD"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -141,3 +142,9 @@ class BulkTransferResult(BaseModel):
     total: int
     successful: List[TransactionResponse]
     failed: List[BulkTransferRowError]
+
+# ==========================
+# Settings Schemas
+# ==========================
+class BaseCurrencyUpdate(BaseModel):
+    base_currency: str = Field(..., description="User's preferred base currency (e.g. USD, EUR, GBP)")
