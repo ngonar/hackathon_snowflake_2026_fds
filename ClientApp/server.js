@@ -6,9 +6,7 @@ import { dirname, join, extname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 8080;
-const API_HOST = process.env.API_HOST || 'remitapp-api-service.gxpx.svc.spcs.internal';
-const API_PORT = process.env.API_PORT || '8000';
-const API_TARGET = process.env.API_URL || `http://${API_HOST}:${API_PORT}`;
+const API_TARGET = process.env.API_URL || 'http://remitapp-api-service.gxpx.svc.spcs.internal:8000';
 const DIST_DIR = join(__dirname, 'dist');
 
 const MIME_TYPES = {
@@ -27,12 +25,20 @@ const server = http.createServer((req, res) => {
     const url = new URL(API_TARGET);
     const isHttps = url.protocol === 'https:';
     const transport = isHttps ? https : http;
+    const proxyHeaders = {
+      host: url.hostname,
+    };
+    if (req.headers['content-type']) proxyHeaders['content-type'] = req.headers['content-type'];
+    if (req.headers['content-length']) proxyHeaders['content-length'] = req.headers['content-length'];
+    if (req.headers['authorization']) proxyHeaders['authorization'] = req.headers['authorization'];
+    if (req.headers['accept']) proxyHeaders['accept'] = req.headers['accept'];
+
     const options = {
       hostname: url.hostname,
       port: url.port || (isHttps ? 443 : 80),
       path: targetPath,
       method: req.method,
-      headers: { ...req.headers, host: url.hostname },
+      headers: proxyHeaders,
     };
 
     const proxyReq = transport.request(options, (proxyRes) => {

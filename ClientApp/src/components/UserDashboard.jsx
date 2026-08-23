@@ -112,8 +112,19 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
     const delayDebounce = setTimeout(async () => {
       setEstimating(true);
       try {
-        const data = await api.estimateTransfer('USD', recipient.currency, parseFloat(sendAmount));
-        setSendEstimate(data);
+        const sourceCurrency = user.base_currency || 'USD';
+        if (sourceCurrency === recipient.currency) {
+          setSendEstimate({
+            exchange_rate: 1,
+            target_currency: recipient.currency,
+            fee: 0,
+            target_amount: parseFloat(sendAmount),
+            total_required: parseFloat(sendAmount),
+          });
+        } else {
+          const data = await api.estimateTransfer(sourceCurrency, recipient.currency, parseFloat(sendAmount));
+          setSendEstimate(data);
+        }
       } catch (err) {
         console.error(err);
         setSendEstimate(null);
@@ -153,7 +164,7 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
     setLoadingDeposit(true);
     try {
       await api.deposit(amount);
-      showToast(`Successfully deposited $${amount.toFixed(2)} USD`, 'success');
+      showToast(`Successfully deposited ${amount.toFixed(2)} ${user.base_currency || 'USD'}`, 'success');
       setDepositAmount('');
       onRefreshUser();
     } catch (err) {
@@ -376,8 +387,8 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
         </div>
 
         <div className="wallet-balance-container">
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Wallet Balance (USD)</span>
-          <span className="balance-amount">${user.wallet_balance.toFixed(2)}</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Wallet Balance ({user.base_currency || 'USD'})</span>
+          <span className="balance-amount">{user.wallet_balance.toFixed(2)} {user.base_currency || 'USD'}</span>
         </div>
 
         <form onSubmit={handleDepositSubmit}>
@@ -386,9 +397,9 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
           </h4>
           <div className="calc-row">
             <div className="form-group" style={{ gridColumn: '1 / span 2' }}>
-              <label>Amount (USD)</label>
+              <label>Amount ({user.base_currency || 'USD'})</label>
               <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>$</span>
+                
                 <input 
                   type="number" 
                   className="input-control" 
@@ -658,9 +669,9 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
             </div>
 
             <div className="form-group">
-              <label>Send Amount (USD)</label>
+              <label>Send Amount ({user.base_currency || 'USD'})</label>
               <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>$</span>
+                
                 <input
                   type="number"
                   className="input-control"
@@ -684,11 +695,11 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
               <div className="calc-details" style={{ margin: '1rem 0', paddingLeft: '1rem' }}>
                 <div className="calc-detail-item">
                   <span>Exchange Rate</span>
-                  <span>1 USD = {sendEstimate.exchange_rate} {sendEstimate.target_currency}</span>
+                  <span>1 {user.base_currency || 'USD'} = {sendEstimate.exchange_rate} {sendEstimate.target_currency}</span>
                 </div>
                 <div className="calc-detail-item">
                   <span>Dynamic Transfer Fee</span>
-                  <span>${sendEstimate.fee.toFixed(2)} USD</span>
+                  <span>{sendEstimate.fee.toFixed(2)} {user.base_currency || 'USD'}</span>
                 </div>
                 <div className="calc-detail-item">
                   <span>Recipient Will Get</span>
@@ -699,7 +710,7 @@ export default function UserDashboard({ user, onRefreshUser, showToast }) {
                 <div className="calc-detail-item total" style={{ fontSize: '1rem' }}>
                   <span>Total Wallet Cost</span>
                   <span style={{ color: user.wallet_balance >= sendEstimate.total_required ? 'var(--success)' : 'var(--danger)' }}>
-                    ${sendEstimate.total_required.toFixed(2)} USD
+                    {sendEstimate.total_required.toFixed(2)} {user.base_currency || 'USD'}
                   </span>
                 </div>
               </div>

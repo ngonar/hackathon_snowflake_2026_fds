@@ -3,6 +3,9 @@ profile:
   description: "Ngonaroid FDS client application"
   icon: public/favicon.svg
 
+external_access_integrations:
+  - SAR_CLIENT_EAI
+
 launch:
   web:
     install: "npm install && npm run build"
