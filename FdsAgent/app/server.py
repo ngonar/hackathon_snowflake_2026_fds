@@ -10,6 +10,7 @@ from app.db import init_db, FDS_DB_PATH
 from app.mcp_client import login_as_admin
 from app.consumer import start_stream_consumer, stop_stream_consumer
 from app.agent import fds_process_chain
+from app.skill_loader import load_skills
 
 load_dotenv()
 
@@ -18,6 +19,10 @@ async def lifespan(app: FastAPI):
     # Startup tasks
     print("FDS Agent Server: Initializing FDS database...")
     init_db()
+
+    # Load skill SQL templates from Cortex Extension stage
+    print("FDS Agent Server: Loading skill SQL templates...")
+    load_skills()
     
     # Establish connection and log in as admin to the MCP server
     print("FDS Agent Server: Logging in to MCP server...")

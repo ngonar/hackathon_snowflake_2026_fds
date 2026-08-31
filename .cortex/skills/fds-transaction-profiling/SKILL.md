@@ -5,7 +5,7 @@ description: Builds behavioral profiles for senders and recipients by querying S
 
 # FDS Transaction Profiling
 
-Queries `NGONAROID_FDS.FDS` tables to build comprehensive behavioral profiles for fraud reasoning.
+Queries `SNOWFLAKE_LEARNING_DB.FDS` tables to build comprehensive behavioral profiles for fraud reasoning.
 
 ## Instructions
 

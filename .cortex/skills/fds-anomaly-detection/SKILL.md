@@ -5,7 +5,7 @@ description: Runs rule-based anomaly scoring against Snowflake transaction histo
 
 # FDS Anomaly Detection
 
-Executes anomaly detection queries against `NGONAROID_FDS.FDS.TRANSACTIONS` to produce velocity flags and an anomaly score for a given transaction.
+Executes anomaly detection queries against `SNOWFLAKE_LEARNING_DB.FDS.TRANSACTIONS` to produce velocity flags and an anomaly score for a given transaction.
 
 ## Instructions
 

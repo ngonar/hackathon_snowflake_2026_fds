@@ -4,11 +4,12 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from dotenv import load_dotenv
 
+from app.skill_loader import get_sql
+
 load_dotenv()
 
 
 def _get_connection():
-    # Inside SPCS, use the OAuth token file
     token_path = "/snowflake/session/token"
     if os.path.exists(token_path):
         with open(token_path, "r") as f:
@@ -22,12 +23,11 @@ def _get_connection():
             database=os.getenv("SNOWFLAKE_DATABASE", "SNOWFLAKE_LEARNING_DB"),
             schema=os.getenv("SNOWFLAKE_SCHEMA", "FDS"),
         )
-    # Fallback for local dev
     key_b64 = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
     if key_b64:
         key_bytes = base64.b64decode(key_b64)
-        private_key = serialization.load_pem_private_key(key_bytes, password=None)
-        pk_der = private_key.private_bytes(
+        pk = serialization.load_pem_private_key(key_bytes, password=None)
+        pk_der = pk.private_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),
@@ -52,54 +52,33 @@ def _get_connection():
     )
 
 
-def get_sender_profile(sender_id: int) -> dict:
+def _execute_skill_query(script_key: str, params: dict) -> dict | None:
+    """Execute a skill SQL template and return the first row as a dict."""
+    sql = get_sql("fds-transaction-profiling", script_key)
     conn = _get_connection()
-    cursor = conn.cursor(snowflake.connector.DictCursor)
-    cursor.execute("SELECT * FROM USERS WHERE ID = %s", (sender_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else {}
+    try:
+        cursor = conn.cursor(snowflake.connector.DictCursor)
+        cursor.execute(sql, params)
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+    finally:
+        conn.close()
+
+
+def get_sender_profile(sender_id: int) -> dict:
+    return _execute_skill_query("sender_profile.sql", {"sender_id": sender_id})
+
+
+def get_sender_behavior(sender_id: int) -> dict:
+    return _execute_skill_query("sender_behavior.sql", {"sender_id": sender_id})
 
 
 def get_recipient_profile(recipient_id: int) -> dict:
-    conn = _get_connection()
-    cursor = conn.cursor(snowflake.connector.DictCursor)
-    cursor.execute("SELECT * FROM RECIPIENTS WHERE ID = %s", (recipient_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else {}
+    return _execute_skill_query("recipient_profile.sql", {"recipient_id": recipient_id})
 
 
-def get_sender_transaction_history(sender_id: int) -> list[dict]:
-    conn = _get_connection()
-    cursor = conn.cursor(snowflake.connector.DictCursor)
-    cursor.execute("""
-        SELECT T.*, R.NAME as RECIPIENT_NAME
-        FROM TRANSACTIONS T
-        LEFT JOIN RECIPIENTS R ON T.RECIPIENT_ID = R.ID
-        WHERE T.SENDER_ID = %s
-        ORDER BY T.CREATED_AT DESC
-        LIMIT 20
-    """, (sender_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-def get_recipient_transaction_history(recipient_id: int) -> list[dict]:
-    conn = _get_connection()
-    cursor = conn.cursor(snowflake.connector.DictCursor)
-    cursor.execute("""
-        SELECT T.*, U.FULL_NAME as SENDER_NAME
-        FROM TRANSACTIONS T
-        LEFT JOIN USERS U ON T.SENDER_ID = U.ID
-        WHERE T.RECIPIENT_ID = %s
-        ORDER BY T.CREATED_AT DESC
-        LIMIT 20
-    """, (recipient_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+def get_recipient_inflow(recipient_id: int) -> dict:
+    return _execute_skill_query("recipient_inflow.sql", {"recipient_id": recipient_id})
 
 
 def enrich_transaction(txn_data: dict) -> dict:
@@ -107,10 +86,9 @@ def enrich_transaction(txn_data: dict) -> dict:
     recipient_id = txn_data.get("recipient_id")
 
     sender_profile = get_sender_profile(sender_id) if sender_id else {}
+    sender_behavior = get_sender_behavior(sender_id) if sender_id else {}
     recipient_profile = get_recipient_profile(recipient_id) if recipient_id else {}
-
-    sender_history = get_sender_transaction_history(sender_id) if sender_id else []
-    recipient_history = get_recipient_transaction_history(recipient_id) if recipient_id else []
+    recipient_inflow = get_recipient_inflow(recipient_id) if recipient_id else {}
 
     if sender_profile:
         sender_profile.pop("HASHED_PASSWORD", None)
@@ -118,7 +96,7 @@ def enrich_transaction(txn_data: dict) -> dict:
     return {
         "transaction": txn_data,
         "sender": sender_profile,
+        "sender_behavior": sender_behavior,
         "recipient": recipient_profile,
-        "sender_history": sender_history,
-        "recipient_history": recipient_history
+        "recipient_inflow": recipient_inflow,
     }

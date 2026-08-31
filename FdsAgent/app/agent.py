@@ -3,7 +3,7 @@ import json
 import asyncio
 import base64
 import datetime
-from typing import Dict, Any, List
+from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableLambda
 import snowflake.connector
@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 from app.db import save_analysis
 from app.enrichment import enrich_transaction
+from app.anomaly_detection import run_anomaly_detection
+from app.skill_loader import load_skills
 from app.mcp_client import (
     update_transaction_status, 
     freeze_wallet, 
@@ -105,7 +107,7 @@ Determine the anomaly_score (0.0 to 100.0) reflecting the anomalous risk.
 Provide a list of velocity_flags triggered, or ['NONE'] if none apply.
 Provide a list of key evidence bullet points in the evidence field."""
 
-# Human message template
+# Human message template (enriched with behavioral profiles + anomaly signals)
 HUMAN_TEMPLATE = """Analyze the following enriched transaction data:
 
 [Incoming Transaction]
@@ -114,14 +116,17 @@ HUMAN_TEMPLATE = """Analyze the following enriched transaction data:
 [Sender Profile]
 {sender_profile}
 
+[Sender Behavioral Profile]
+{sender_behavior}
+
 [Recipient Profile]
 {recipient_profile}
 
-[Sender Transaction History (latest first)]
-{sender_history}
+[Recipient Inflow History]
+{recipient_inflow}
 
-[Recipient Transaction History (latest first)]
-{recipient_history}
+[Rule-Based Anomaly Detection Results]
+{anomaly_results}
 """
 
 def _json_serial(obj):
@@ -130,20 +135,22 @@ def _json_serial(obj):
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
-def build_prompt(enriched_data: dict) -> str:
-    """Builds the full prompt string for Cortex Complete from enriched data."""
+def build_prompt(enriched_data: dict, anomaly_results: dict) -> str:
+    """Builds the full prompt string for Cortex Complete from enriched data and anomaly signals."""
     current_transaction = json.dumps(enriched_data.get("transaction", {}), indent=2, default=_json_serial)
     sender_profile = json.dumps(enriched_data.get("sender", {}), indent=2, default=_json_serial)
+    sender_behavior = json.dumps(enriched_data.get("sender_behavior", {}), indent=2, default=_json_serial)
     recipient_profile = json.dumps(enriched_data.get("recipient", {}), indent=2, default=_json_serial)
-    sender_history = json.dumps(enriched_data.get("sender_history", []), indent=2, default=_json_serial)
-    recipient_history = json.dumps(enriched_data.get("recipient_history", []), indent=2, default=_json_serial)
+    recipient_inflow = json.dumps(enriched_data.get("recipient_inflow", {}), indent=2, default=_json_serial)
+    anomaly_json = json.dumps(anomaly_results, indent=2, default=_json_serial)
 
     human_message = HUMAN_TEMPLATE.format(
         current_transaction=current_transaction,
         sender_profile=sender_profile,
+        sender_behavior=sender_behavior,
         recipient_profile=recipient_profile,
-        sender_history=sender_history,
-        recipient_history=recipient_history,
+        recipient_inflow=recipient_inflow,
+        anomaly_results=anomaly_json,
     )
 
     json_schema = json.dumps(FraudAnalysisResult.model_json_schema(), indent=2)
@@ -175,15 +182,37 @@ async def call_cortex_complete(prompt: str) -> FraudAnalysisResult:
         conn.close()
 
 async def analyze_and_process_txn(txn: dict) -> dict:
-    """Enriches, analyzes, logs, and funds/fails a transaction."""
+    """Enriches, runs anomaly detection, classifies via LLM, logs, and remediates a transaction."""
     print(f"FDS Agent: Starting analysis for txn {txn.get('id')} ({txn.get('reference_number')})...")
-    # 1. Enrich transaction data from remittance.db
+
+    # 0. Ensure skills are loaded
+    load_skills()
+
+    # 1. Enrich transaction data using skill profiling queries
     enriched = enrich_transaction(txn)
-    
-    # 2. Build prompt and call Cortex Complete
-    prompt = build_prompt(enriched)
-    
-    # Call Cortex model with retry logic for transient API issues
+
+    # 2. Run rule-based anomaly detection (5 skill checks)
+    txn_hour = 0
+    try:
+        created_at = txn.get("created_at")
+        if hasattr(created_at, "hour"):
+            txn_hour = created_at.hour
+    except Exception:
+        pass
+
+    anomaly_results = run_anomaly_detection(
+        sender_id=txn.get("sender_id"),
+        recipient_id=txn.get("recipient_id"),
+        source_amount=txn.get("source_amount", 0.0),
+        txn_hour=txn_hour,
+    )
+    rule_score = anomaly_results["anomaly_score"]
+    rule_flags = anomaly_results["velocity_flags"]
+    print(f"FDS Agent: Rule-based anomaly score: {rule_score}, flags: {rule_flags}")
+
+    # 3. Build prompt with enriched data + anomaly signals, call Cortex LLM
+    prompt = build_prompt(enriched, anomaly_results)
+
     max_retries = 3
     retry_delay = 1
     analysis = None
@@ -201,70 +230,69 @@ async def analyze_and_process_txn(txn: dict) -> dict:
             print(f"FDS Agent: Transient model error (attempt {attempt+1}/{max_retries}): {e}. Retrying in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
             retry_delay *= 2
-            
+
     if use_fallback:
-        amount = txn.get("source_amount", 0.0)
-        if amount >= 1000.0:
+        # Use rule-based score as the primary signal when LLM is unavailable
+        if rule_score >= 50:
+            fraud_type = "Unknown"
+            for flag in rule_flags:
+                type_map = {
+                    "SMURFING": "Smurfing",
+                    "CIRCULAR_TRANSFER": "Circular or Cross-Channel Transfer",
+                    "RAPID_ONBOARDING": "Rapid Onboarding and Transfer",
+                    "AMOUNT_SPIKE": "Account Take Over",
+                    "UNUSUAL_HOURS": "Time-Based Evasion",
+                }
+                if flag in type_map:
+                    fraud_type = type_map[flag]
+                    break
             analysis = FraudAnalysisResult(
-                is_fraud=True,
-                fraud_type="Account Take Over",
-                explanation=f"This transaction is flagged as high-risk due to a sudden and massive spike in remittance amount. The transfer amount (${amount:.2f}) is more than 10x the user's historical transaction average. Furthermore, the recipient bank account is newly registered, indicating potential Account Take Over (ATO) activity.",
-                anomaly_score=92.5,
-                velocity_flags=["AMOUNT_SPIKE", "NEW_RECIPIENT_BURST"],
-                evidence=[
-                    f"Transaction amount (${amount:.2f}) is extremely high relative to user history.",
-                    "The recipient account was added within the last 10 minutes.",
-                    "Initiated from an IP address with no historical profile association."
-                ]
-            )
-        elif amount >= 500.0:
-            analysis = FraudAnalysisResult(
-                is_fraud=False,
-                fraud_type="None",
-                explanation=f"The transaction is allowed but flagged as SUSPICIOUS. The transfer amount (${amount:.2f}) is moderately higher than average, and the transaction is initiated at an unusual local time (3:14 AM). Compliance review is recommended, but immediate blocking is not enforced.",
-                anomaly_score=68.0,
-                velocity_flags=["UNUSUAL_HOURS", "AMOUNT_SPIKE"],
-                evidence=[
-                    f"Transaction amount (${amount:.2f}) exceeds normal velocity limit threshold.",
-                    "Created outside standard daytime hours (3:14 AM local time)."
-                ]
+                is_fraud=rule_score >= 65,
+                fraud_type=fraud_type if rule_score >= 65 else "None",
+                explanation=f"Rule-based detection triggered {len([f for f in rule_flags if f != 'NONE'])} anomaly flags with a composite score of {rule_score:.1f}. LLM classification unavailable.",
+                anomaly_score=rule_score,
+                velocity_flags=rule_flags,
+                evidence=[f"Rule flag: {f}" for f in rule_flags if f != "NONE"],
             )
         else:
             analysis = FraudAnalysisResult(
                 is_fraud=False,
                 fraud_type="None",
-                explanation="The transaction is consistent with historical patterns. The transfer amount is within the expected range and no anomalous indicators or velocity flags were triggered.",
-                anomaly_score=12.5,
-                velocity_flags=["NONE"],
-                evidence=[
-                    "Transaction is within the normal daily historical range.",
-                    "Recipient has previous successful transfers."
-                ]
+                explanation="No significant anomaly flags triggered by rule-based detection. LLM classification unavailable.",
+                anomaly_score=rule_score,
+                velocity_flags=rule_flags,
+                evidence=["No rule-based anomaly flags triggered."],
             )
-            
-    print(f"FDS Agent: Analysis finished. is_fraud: {analysis.is_fraud}, type: {analysis.fraud_type}, score: {analysis.anomaly_score}")
+
+    # 4. Merge rule-based and LLM scores: use the higher of the two
+    final_score = max(analysis.anomaly_score, rule_score)
+    merged_flags = list(set(analysis.velocity_flags + rule_flags))
+    if "NONE" in merged_flags and len(merged_flags) > 1:
+        merged_flags.remove("NONE")
+
+    print(f"FDS Agent: LLM score: {analysis.anomaly_score}, Rule score: {rule_score}, Final: {final_score}")
     
-    # 3. Determine decision and risk tier based on fraud evaluation and anomaly score
+    # 5. Determine decision and risk tier based on merged score
     if analysis.is_fraud:
         decision = "FAILED"
-    elif analysis.anomaly_score >= 50.0:
+    elif final_score >= 50.0:
         decision = "SUSPICIOUS"
     else:
         decision = "FUNDED"
     
     # Determine risk tier for remediation
-    if analysis.anomaly_score >= 85.0:
+    if final_score >= 85.0:
         risk_tier = "CRITICAL"
-    elif analysis.anomaly_score >= 65.0:
+    elif final_score >= 65.0:
         risk_tier = "HIGH"
-    elif analysis.anomaly_score >= 50.0:
+    elif final_score >= 50.0:
         risk_tier = "MEDIUM"
     else:
         risk_tier = "LOW"
     
     print(f"FDS Agent: Risk tier: {risk_tier}, Decision: {decision}")
     
-    # 4. Log results to Snowflake FRAUD_ANALYSIS_LOG
+    # 6. Log results to Snowflake FRAUD_ANALYSIS_LOG
     try:
         log_conn = _get_snowflake_session()
         log_cursor = log_conn.cursor()
@@ -282,8 +310,8 @@ async def analyze_and_process_txn(txn: dict) -> dict:
                 txn.get("source_amount"),
                 analysis.is_fraud,
                 analysis.fraud_type,
-                analysis.anomaly_score,
-                json.dumps(analysis.velocity_flags),
+                final_score,
+                json.dumps(merged_flags),
                 json.dumps(analysis.evidence),
                 analysis.explanation,
                 decision,
@@ -312,21 +340,20 @@ async def analyze_and_process_txn(txn: dict) -> dict:
         fraud_type=analysis.fraud_type,
         explanation=analysis.explanation,
         decision=decision,
-        anomaly_score=analysis.anomaly_score,
-        velocity_flags=json.dumps(analysis.velocity_flags),
+        anomaly_score=final_score,
+        velocity_flags=json.dumps(merged_flags),
         evidence=json.dumps(analysis.evidence)
     )
     
-    # 5. Execute autonomous remediation workflow based on risk tier
+    # 7. Execute autonomous remediation workflow based on risk tier
     remediation_actions = []
     
     try:
-        # Always update transaction status
         await update_transaction_status(
             txn_id=txn.get("id"), 
             status_value=decision,
-            anomaly_score=analysis.anomaly_score,
-            velocity_flags=json.dumps(analysis.velocity_flags),
+            anomaly_score=final_score,
+            velocity_flags=json.dumps(merged_flags),
             fraud_explanation=analysis.explanation,
             fraud_evidence=json.dumps(analysis.evidence)
         )
@@ -374,7 +401,7 @@ async def analyze_and_process_txn(txn: dict) -> dict:
         print(f"FDS Agent: Warning: Remediation workflow error: {e}")
         remediation_actions.append(f"REMEDIATION_ERROR:{e}")
     
-    # 6. Log remediation to Snowflake (best-effort)
+    # 8. Log remediation to Snowflake (best-effort)
     try:
         conn = _get_snowflake_session()
         cursor = conn.cursor()
@@ -391,13 +418,15 @@ async def analyze_and_process_txn(txn: dict) -> dict:
                 txn.get("sender_id"),
                 f"REMEDIATION_{risk_tier}",
                 risk_tier,
-                analysis.anomaly_score,
+                final_score,
                 analysis.fraud_type,
                 json.dumps({
                     "decision": decision,
                     "actions_taken": remediation_actions,
-                    "velocity_flags": analysis.velocity_flags,
-                    "evidence": analysis.evidence
+                    "velocity_flags": merged_flags,
+                    "evidence": analysis.evidence,
+                    "rule_based_score": rule_score,
+                    "llm_score": analysis.anomaly_score,
                 })
             )
         )
@@ -413,8 +442,10 @@ async def analyze_and_process_txn(txn: dict) -> dict:
         "is_fraud": analysis.is_fraud,
         "fraud_type": analysis.fraud_type,
         "explanation": analysis.explanation,
-        "anomaly_score": analysis.anomaly_score,
-        "velocity_flags": analysis.velocity_flags,
+        "anomaly_score": final_score,
+        "rule_based_score": rule_score,
+        "llm_score": analysis.anomaly_score,
+        "velocity_flags": merged_flags,
         "evidence": analysis.evidence,
         "decision": decision,
         "risk_tier": risk_tier,

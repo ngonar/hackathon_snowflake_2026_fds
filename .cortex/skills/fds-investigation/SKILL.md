@@ -5,7 +5,7 @@ description: Ad-hoc fraud investigation over historical analysis results in Snow
 
 # FDS Investigation
 
-Provides investigative queries over `NGONAROID_FDS.FDS.FRAUD_ANALYSIS_LOG` and transaction history for compliance review and pattern analysis.
+Provides investigative queries over `SNOWFLAKE_LEARNING_DB.FDS.FRAUD_ANALYSIS_LOG` and transaction history for compliance review and pattern analysis.
 
 ## Instructions
 

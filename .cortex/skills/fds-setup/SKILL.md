@@ -5,7 +5,7 @@ description: Initialize the Ngonaroid FDS Snowflake schema, tables, streams, and
 
 # FDS Setup
 
-Provisions the `NGONAROID_FDS.FDS` schema with all required tables, streams, and tasks for the fraud detection pipeline.
+Provisions the `SNOWFLAKE_LEARNING_DB.FDS` schema with all required tables, streams, and tasks for the fraud detection pipeline.
 
 ## Instructions
 
