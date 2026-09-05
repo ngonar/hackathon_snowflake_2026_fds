@@ -3,6 +3,7 @@ import json
 import asyncio
 import base64
 import datetime
+import decimal
 from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableLambda
@@ -132,6 +133,8 @@ HUMAN_TEMPLATE = """Analyze the following enriched transaction data:
 def _json_serial(obj):
     if isinstance(obj, (datetime.datetime, datetime.date)):
         return obj.isoformat()
+    if isinstance(obj, decimal.Decimal):
+        return float(obj)
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
